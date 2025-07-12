@@ -1,0 +1,43 @@
+2025/07/12-10:53:54.712 8b4 Reusing MANIFEST C:\Users\dell\Desktop\whatsapp\whatsapp_profile\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2025/07/12-10:53:54.714 8b4 Recovering log #279
+2025/07/12-10:53:54.913 8b4 Reusing old log C:\Users\dell\Desktop\whatsapp\whatsapp_profile\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000279.log 
+2025/07/12-10:53:56.609 3be8 Level-0 table #289: started
+2025/07/12-10:53:56.646 3be8 Level-0 table #289: 766783 bytes OK
+2025/07/12-10:53:56.648 3be8 Delete type=0 #279
+2025/07/12-10:53:56.650 3be8 Manual compaction at level-0 from '\x00<\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00=\x00\x00\x00' @ 0 : 0; will stop at (end)
+2025/07/12-10:53:59.476 8b4 Compacting 1@1 + 6@2 files
+2025/07/12-10:53:59.647 8b4 Generated table #290@1: 57650 keys, 2216724 bytes
+2025/07/12-10:53:59.771 8b4 Generated table #291@1: 32312 keys, 2207859 bytes
+2025/07/12-10:53:59.825 8b4 Generated table #292@1: 2340 keys, 2150920 bytes
+2025/07/12-10:53:59.898 8b4 Generated table #293@1: 9287 keys, 2172514 bytes
+2025/07/12-10:54:00.062 8b4 Generated table #294@1: 33865 keys, 2234966 bytes
+2025/07/12-10:54:00.197 8b4 Generated table #295@1: 55061 keys, 1419353 bytes
+2025/07/12-10:54:00.197 8b4 Compacted 1@1 + 6@2 files => 12402336 bytes
+2025/07/12-10:54:00.198 8b4 compacted to: files[ 0 0 6 0 0 0 0 ]
+2025/07/12-10:54:06.514 3fb4 Level-0 table #297: started
+2025/07/12-10:54:06.526 3fb4 Level-0 table #297: 149109 bytes OK
+2025/07/12-10:54:06.529 3fb4 Delete type=2 #281
+2025/07/12-10:54:06.529 3fb4 Delete type=2 #282
+2025/07/12-10:54:06.529 3fb4 Delete type=2 #283
+2025/07/12-10:54:06.529 3fb4 Delete type=2 #284
+2025/07/12-10:54:06.530 3fb4 Delete type=2 #285
+2025/07/12-10:54:06.530 3fb4 Delete type=2 #286
+2025/07/12-10:54:06.530 3fb4 Delete type=0 #288
+2025/07/12-10:54:06.530 3fb4 Delete type=2 #289
+2025/07/12-10:54:06.537 3fb4 Manual compaction at level-0 from '\x00=\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00>\x00\x00\x00' @ 0 : 0; will stop at (end)
+2025/07/12-10:54:09.579 8b4 Compacting 1@1 + 6@2 files
+2025/07/12-10:54:09.807 8b4 Generated table #298@1: 58047 keys, 2216922 bytes
+2025/07/12-10:54:09.951 8b4 Generated table #299@1: 32526 keys, 2207986 bytes
+2025/07/12-10:54:10.009 8b4 Generated table #300@1: 2339 keys, 2151716 bytes
+2025/07/12-10:54:10.148 8b4 Generated table #301@1: 9160 keys, 2173129 bytes
+2025/07/12-10:54:10.296 8b4 Generated table #302@1: 33992 keys, 2233454 bytes
+2025/07/12-10:54:10.386 8b4 Generated table #303@1: 55223 keys, 1437115 bytes
+2025/07/12-10:54:10.386 8b4 Compacted 1@1 + 6@2 files => 12420322 bytes
+2025/07/12-10:54:10.388 8b4 compacted to: files[ 0 0 6 0 0 0 0 ]
+2025/07/12-10:54:10.390 8b4 Delete type=2 #290
+2025/07/12-10:54:10.390 8b4 Delete type=2 #291
+2025/07/12-10:54:10.390 8b4 Delete type=2 #292
+2025/07/12-10:54:10.390 8b4 Delete type=2 #293
+2025/07/12-10:54:10.390 8b4 Delete type=2 #294
+2025/07/12-10:54:10.390 8b4 Delete type=2 #295
+2025/07/12-10:54:10.390 8b4 Delete type=2 #297

@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Message Sender</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #25D366, #128C7E);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            max-width: 500px;
+            width: 100%;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            color: #25D366;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            color: #666;
+            font-size: 1.1em;
+        }
+        
+        .api-info {
+            background: #f0f8ff;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            border: 1px solid #25D366;
+        }
+        
+        .api-info h3 {
+            color: #25D366;
+            margin-bottom: 10px;
+        }
+        
+        .api-info code {
+            background: #e8e8e8;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 600;
+        }
+        
+        input[type="text"], textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+        }
+        
+        input[type="text"]:focus, textarea:focus {
+            outline: none;
+            border-color: #25D366;
+        }
+        
+        textarea {
+            height: 100px;
+            resize: vertical;
+        }
+        
+        .send-btn {
+            width: 100%;
+            padding: 15px;
+            background: #25D366;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+        
+        .send-btn:hover {
+            background: #128C7E;
+        }
+        
+        .send-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            font-weight: 600;
+        }
+        
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status.info {
+            background: #cce7ff;
+            color: #004085;
+            border: 1px solid #b8daff;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #25D366, #128C7E);
+            transition: width 0.3s ease;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            margin-top: 20px;
+        }
+        
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #25D366;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .setup-link {
+            text-align: center;
+            margin-top: 20px;
+        }
+        
+        .setup-link a {
+            color: #25D366;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        
+        .setup-link a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📱 WhatsApp Sender</h1>
+            <p>Send messages instantly via WhatsApp Web</p>
+        </div>
+        
+        <div class="api-info">
+            <h3>🔗 API Endpoints</h3>
+            <p><strong>Send Message:</strong> <code>POST /api/send-message</code></p>
+            <p><strong>Check Status:</strong> <code>GET /api/status/{session_id}</code></p>
+            <p><strong>Health Check:</strong> <code>GET /api/health</code></p>
+        </div>
+        
+        <form id="messageForm">
+            <div class="form-group">
+                <label for="phone_number">Phone Number (with country code):</label>
+                <input type="text" id="phone_number" name="phone_number" 
+                       placeholder="+911234567890" value="+911234567890" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="message">Message:</label>
+                <textarea id="message" name="message" 
+                          placeholder="Enter your message here..." required>Hello from my bot!</textarea>
+            </div>
+            
+            <button type="submit" class="send-btn" id="sendBtn">Send Message</button>
+        </form>
+        
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Sending message...</p>
+        </div>
+        
+        <div id="status" class="status" style="display: none;">
+            <div id="statusText"></div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+            </div>
+        </div>
+        
+        <div class="setup-link">
+            <a href="/setup">Need help with setup?</a>
+        </div>
+    </div>
+
+    <script>
+        let currentSessionId = null;
+        
+        const form = document.getElementById('messageForm');
+        const sendBtn = document.getElementById('sendBtn');
+        const loading = document.getElementById('loading');
+        const statusDiv = document.getElementById('status');
+        const statusText = document.getElementById('statusText');
+        const progressFill = document.getElementById('progressFill');
+        
+        // Check status periodically
+        function checkStatus() {
+            fetch('/status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.is_sending) {
+                        sendBtn.disabled = true;
+                        sendBtn.textContent = 'Sending...';
+                        loading.style.display = 'block';
+                        showStatus(data.status_message, 'info', data.progress || 0);
+                    } else {
+                        sendBtn.disabled = false;
+                        sendBtn.textContent = 'Send Message';
+                        loading.style.display = 'none';
+                        
+                        if (data.status_message.includes('successfully')) {
+                            showStatus(data.status_message, 'success', 100);
+                        } else if (data.status_message.includes('Error')) {
+                            showStatus(data.status_message, 'error', 0);
+                        } else if (data.status_message !== 'Ready to send message') {
+                            showStatus(data.status_message, 'info', data.progress || 0);
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Error checking status:', error);
+                });
+        }
+        
+        function showStatus(message, type, progress = 0) {
+            statusText.textContent = message;
+            statusDiv.className = `status ${type}`;
+            statusDiv.style.display = 'block';
+            progressFill.style.width = `${progress}%`;
+        }
+        
+        // Check status every 2 seconds
+        setInterval(checkStatus, 2000);
+        
+        // Handle form submission
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(form);
+            
+            fetch('/send', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    currentSessionId = data.session_id;
+                    showStatus(data.message, 'info', 0);
+                } else {
+                    showStatus(data.error, 'error', 0);
+                }
+            })
+            .catch(error => {
+                showStatus('Network error occurred', 'error', 0);
+            });
+        });
+        
+        // Initial status check
+        checkStatus();
+    </script>
+</body>
+</html>

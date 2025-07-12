@@ -1,0 +1,43 @@
+2025/07/12-10:52:56.177 2d2c Reusing MANIFEST C:\Users\dell\Desktop\whatsapp\whatsapp_profile\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2025/07/12-10:52:56.179 2d2c Recovering log #262
+2025/07/12-10:52:56.327 2d2c Reusing old log C:\Users\dell\Desktop\whatsapp\whatsapp_profile\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000262.log 
+2025/07/12-10:52:58.339 2d2c Level-0 table #272: started
+2025/07/12-10:52:58.390 2d2c Level-0 table #272: 771118 bytes OK
+2025/07/12-10:52:58.394 2d2c Delete type=0 #262
+2025/07/12-10:52:58.396 16b4 Manual compaction at level-0 from '\x00:\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00;\x00\x00\x00' @ 0 : 0; will stop at (end)
+2025/07/12-10:53:01.482 42d8 Compacting 1@1 + 6@2 files
+2025/07/12-10:53:01.670 42d8 Generated table #273@1: 55631 keys, 2216703 bytes
+2025/07/12-10:53:01.796 42d8 Generated table #274@1: 30844 keys, 2203009 bytes
+2025/07/12-10:53:01.852 42d8 Generated table #275@1: 2274 keys, 2151617 bytes
+2025/07/12-10:53:01.931 42d8 Generated table #276@1: 10419 keys, 2176884 bytes
+2025/07/12-10:53:02.050 42d8 Generated table #277@1: 32734 keys, 2231786 bytes
+2025/07/12-10:53:02.128 42d8 Generated table #278@1: 49309 keys, 1162467 bytes
+2025/07/12-10:53:02.128 42d8 Compacted 1@1 + 6@2 files => 12142466 bytes
+2025/07/12-10:53:02.130 42d8 compacted to: files[ 0 0 6 0 0 0 0 ]
+2025/07/12-10:53:02.131 42d8 Delete type=2 #264
+2025/07/12-10:53:02.131 42d8 Delete type=2 #265
+2025/07/12-10:53:02.131 42d8 Delete type=2 #266
+2025/07/12-10:53:02.131 42d8 Delete type=2 #267
+2025/07/12-10:53:02.131 42d8 Delete type=2 #268
+2025/07/12-10:53:02.132 42d8 Delete type=2 #269
+2025/07/12-10:53:02.132 42d8 Delete type=2 #272
+2025/07/12-10:53:09.661 2d2c Level-0 table #280: started
+2025/07/12-10:53:09.679 2d2c Level-0 table #280: 393460 bytes OK
+2025/07/12-10:53:09.681 2d2c Delete type=0 #271
+2025/07/12-10:53:09.683 2d2c Manual compaction at level-0 from '\x00;\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00<\x00\x00\x00' @ 0 : 0; will stop at (end)
+2025/07/12-10:53:09.693 2d2c Compacting 1@1 + 6@2 files
+2025/07/12-10:53:09.802 2d2c Generated table #281@1: 56479 keys, 2216667 bytes
+2025/07/12-10:53:09.912 2d2c Generated table #282@1: 31123 keys, 2203896 bytes
+2025/07/12-10:53:09.974 2d2c Generated table #283@1: 2308 keys, 2150342 bytes
+2025/07/12-10:53:10.078 2d2c Generated table #284@1: 9928 keys, 2175557 bytes
+2025/07/12-10:53:10.241 2d2c Generated table #285@1: 33309 keys, 2230369 bytes
+2025/07/12-10:53:10.376 2d2c Generated table #286@1: 49353 keys, 1215181 bytes
+2025/07/12-10:53:10.376 2d2c Compacted 1@1 + 6@2 files => 12192012 bytes
+2025/07/12-10:53:10.379 2d2c compacted to: files[ 0 0 6 0 0 0 0 ]
+2025/07/12-10:53:10.380 2d2c Delete type=2 #273
+2025/07/12-10:53:10.380 2d2c Delete type=2 #274
+2025/07/12-10:53:10.381 2d2c Delete type=2 #275
+2025/07/12-10:53:10.381 2d2c Delete type=2 #276
+2025/07/12-10:53:10.381 2d2c Delete type=2 #277
+2025/07/12-10:53:10.381 2d2c Delete type=2 #278
+2025/07/12-10:53:10.381 2d2c Delete type=2 #280

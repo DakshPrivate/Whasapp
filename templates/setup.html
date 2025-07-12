@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Setup - WhatsApp Message Sender</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #25D366, #128C7E);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            color: #25D366;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .setup-content {
+            line-height: 1.6;
+            color: #333;
+        }
+        
+        .step {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 10px;
+            border-left: 4px solid #25D366;
+        }
+        
+        .step h3 {
+            color: #25D366;
+            margin-bottom: 10px;
+        }
+        
+        .api-section {
+            background: #f0f8ff;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            border: 1px solid #25D366;
+        }
+        
+        .api-section h3 {
+            color: #25D366;
+            margin-bottom: 15px;
+        }
+        
+        .code {
+            background: #f4f4f4;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            margin: 10px 0;
+            overflow-x: auto;
+        }
+        
+        .json-example {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+            overflow-x: auto;
+        }
+        
+        .back-link {
+            text-align: center;
+            margin-top: 30px;
+        }
+        
+        .back-link a {
+            color: #25D366;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 18px;
+        }
+        
+        .back-link a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔧 Setup Instructions</h1>
+            <p>Complete setup guide for WhatsApp API Server</p>
+        </div>
+        
+        <div class="setup-content">
+            <div class="step">
+                <h3>Step 1: Install Required Dependencies</h3>
+                <p>Install the required Python packages:</p>
+                <div class="code">pip install flask flask-cors selenium</div>
+            </div>
+            
+            <div class="step">
+                <h3>Step 2: Install ChromeDriver</h3>
+                <p>Download ChromeDriver from <a href="https://chromedriver.chromium.org/" target="_blank">https://chromedriver.chromium.org/</a> and add it to your PATH, or install via:</p>
+                <div class="code">pip install chromedriver-autoinstaller</div>
+            </div>
+            
+            <div class="step">
+                <h3>Step 3: First Time Setup</h3>
+                <p>On your first run, you'll need to:</p>
+                <ul>
+                    <li>Run the Flask app</li>
+                    <li>Try to send a message (it will open Chrome)</li>
+                    <li>Scan the QR code in WhatsApp Web</li>
+                    <li>After that, all subsequent runs will be in headless mode</li>
+                </ul>
+            </div>
+            
+            <div class="api-section">
+                <h3>📡 API Endpoints for Kotlin App</h3>
+                
+                <h4>1. Send Message</h4>
+                <div class="code">POST http://your-server-ip:5000/api/send-message</div>
+                <p><strong>Request Body (JSON):</strong></p>
+                <div class="json-example">{
+    "phone_number": "+911234567890",
+    "message": "Hello from my Kotlin app!"
+}</div>
+                <p><strong>Response:</strong></p>
+                <div class="json-example">{
+    "success": true,
+    "message": "Message sending started",
+    "session_id": "uuid-here",
+    "status": "started"
+}</div>
+                
+                <h4>2. Check Status</h4>
+                <div class="code">GET http://your-server-ip:5000/api/status/{session_id}</div>
+                <p><strong>Response:</strong></p>
+                <div class="json-example">{
+    "success": true,
+    "session_id": "uuid-here",
+    "phone_number": "+911234567890",
+    "message": "Hello from my Kotlin app!",
+    "status": "Message sent successfully!",
+    "progress": 100,
+    "timestamp": "2024-01-01T12:00:00",
+    "is_complete": true,
+    "is_success": true,
+    "error": null
+}</div>
+                
+                <h4>3. Health Check</h4>
+                <div class="code">GET http://your-server-ip:5000/api/health</div>
+                <p><strong>Response:</strong></p>
+                <div class="json-example">{
+    "success": true,
+    "status": "healthy",
+    "timestamp": "2024-01-01T12:00:00",
+    "is_sending": false
+}</div>
+            </div>
+            
+            <div class="step">
+                <h3>Step 4: Run the Application</h3>
+                <p>Save the code as <code>app.py</code> and run:</p>
+                <div class="code">python app.py</div>
+                <p>The server will start on <code>http://0.0.0.0:5000</code></p>
+            </div>
+            
+            <div class="step">
+                <h3>Step 5: Kotlin App Integration</h3>
+                <p>In your Kotlin app, you can use libraries like Retrofit or OkHttp to make API calls:</p>
+                <div class="code">
+// Example using Retrofit
+val retrofit = Retrofit.Builder()
+    .baseUrl("http://your-server-ip:5000/")
+    .addConverterFactory(GsonConverterFactory.create())
+    .build()
+
+val apiService = retrofit.create(WhatsAppApiService::class.java)
+
+// Send message
+val request = SendMessageRequest("+911234567890", message)
+                </div>
+            </div>
+            
+            <div class="step">
+                <h3>🔧 Troubleshooting</h3>
+                <ul>
+                    <li><strong>Chrome not found:</strong> Make sure Chrome is installed and ChromeDriver is in PATH</li>
+                    <li><strong>WhatsApp not loading:</strong> Check your internet connection and try again</li>
+                    <li><strong>QR Code issues:</strong> Delete the whatsapp_profile folder and scan QR code again</li>
+                    <li><strong>Message not sending:</strong> Check if the phone number is valid and has WhatsApp</li>
+                </ul>
+            </div>
+            
+            <div class="step">
+                <h3>📱 Kotlin App Example</h3>
+                <p>Here's a complete example for your Kotlin app:</p>
+                <div class="code">
+// Data classes
+data class SendMessageRequest(
+    val phone_number: String,
+    val message: String
+)
+
+data class SendMessageResponse(
+    val success: Boolean,
+    val message: String,
+    val session_id: String?,
+    val status: String?
+)
+
+data class StatusResponse(
+    val success: Boolean,
+    val session_id: String?,
+    val phone_number: String?,
+    val message: String?,
+    val status: String?,
+    val progress: Int?,
+    val timestamp: String?,
+    val is_complete: Boolean?,
+    val is_success: Boolean?,
+    val error: String?
+)
+
+// API Interface
+interface WhatsAppApiService {
+    @POST("api/send-message")
+    suspend fun sendMessage(@Body request: SendMessageRequest): Response<SendMessageResponse>
+    
+    @GET("api/status/{sessionId}")
+    suspend fun getStatus(@Path("sessionId") sessionId: String): Response<StatusResponse>
+    
+    @GET("api/health")
+    suspend fun healthCheck(): Response<Map<String, Any>>
+}
+
+// Usage in Activity/Fragment
+class MainActivity : AppCompatActivity() {
+    private lateinit var apiService: WhatsAppApiService
+    
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+        
+        // Initialize Retrofit
+        val retrofit = Retrofit.Builder()
+            .baseUrl("http://YOUR_SERVER_IP:5000/")
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            
+        apiService = retrofit.create(WhatsAppApiService::class.java)
+        
+        // Example: Send message
+        sendWhatsAppMessage("+911234567890", "Hello from Kotlin!")
+    }
+    
+    private fun sendWhatsAppMessage(phoneNumber: String, message: String) {
+        lifecycleScope.launch {
+            try {
+                val request = SendMessageRequest(phoneNumber, message)
+                val response = apiService.sendMessage(request)
+                
+                if (response.isSuccessful) {
+                    val result = response.body()
+                    if (result?.success == true) {
+                        Toast.makeText(this@MainActivity, "Message sending started", Toast.LENGTH_SHORT).show()
+                        result.session_id?.let { sessionId ->
+                            trackMessageStatus(sessionId)
+                        }
+                    } else {
+                        Toast.makeText(this@MainActivity, "Failed: ${result?.message}", Toast.LENGTH_LONG).show()
+                    }
+                } else {
+                    Toast.makeText(this@MainActivity, "HTTP Error: ${response.code()}", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(this@MainActivity, "Network Error: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+    
+    private fun trackMessageStatus(sessionId: String) {
+        lifecycleScope.launch {
+            var isComplete = false
+            while (!isComplete) {
+                try {
+                    val response = apiService.getStatus(sessionId)
+                    if (response.isSuccessful) {
+                        val status = response.body()
+                        if (status?.success == true) {
+                            // Update UI with progress
+                            runOnUiThread {
+                                updateProgressUI(status.status, status.progress ?: 0)
+                            }
+                            
+                            if (status.is_complete == true) {
+                                isComplete = true
+                                runOnUiThread {
+                                    if (status.is_success == true) {
+                                        Toast.makeText(this@MainActivity, "Message sent successfully!", Toast.LENGTH_LONG).show()
+                                    } else {
+                                        Toast.makeText(this@MainActivity, "Failed: ${status.error}", Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    delay(2000) // Check every 2 seconds
+                } catch (e: Exception) {
+                    break
+                }
+            }
+        }
+    }
+    
+    private fun updateProgressUI(status: String?, progress: Int) {
+        // Update your progress bar and status text here
+        // Example:
+        // progressBar.progress = progress
+        // statusTextView.text = status
+    }
+}
+
+// Add to build.gradle (app level)
+dependencies {
+    implementation 'com.squareup.retrofit2:retrofit:2.9.0'
+    implementation 'com.squareup.retrofit2:converter-gson:2.9.0'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.6.2'
+}
+
+// Add to AndroidManifest.xml
+<uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+                </div>
+            </div>
+            
+            <div class="step">
+                <h3>🌐 Network Configuration</h3>
+                <p>Make sure your server is accessible from your Android device:</p>
+                <ul>
+                    <li>If testing locally, use your computer's IP address (not localhost)</li>
+                    <li>Make sure port 5000 is not blocked by firewall</li>
+                    <li>For production, deploy to a cloud server (AWS, Google Cloud, etc.)</li>
+                </ul>
+                <div class="code">
+# Find your IP address
+# Windows: ipconfig
+# Mac/Linux: ifconfig or ip addr show
+# Then use: http://192.168.1.100:5000/ (replace with your IP)
+                </div>
+            </div>
+        </div>
+        
+        <div class="back-link">
+            <a href="/">← Back to Message Sender</a>
+        </div>
+    </div>
+</body>
+</html>
