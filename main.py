@@ -17,7 +17,7 @@ import platform
 
 
 # Environment detection
-IS_CLOUD = bool(os.getenv('RENDER') or os.getenv('HEROKU') or os.getenv('RAILWAY'))
+IS_CLOUD = bool(os.getenv('RENDER') or os.getenv('HEROKU') or os.getenv('RAILWAY') or os.getenv('VERCEL'))
 IS_LOCAL = not IS_CLOUD
 
 print(f"🌍 Environment: {'Cloud' if IS_CLOUD else 'Local'}")
@@ -39,7 +39,6 @@ sending_status = {
 active_sessions = {}
 
 import os
-
 def setup_chrome_driver(headless=True):
     """Setup Chrome driver with persistent session for WhatsApp Web"""
     chrome_options = Options()
@@ -52,44 +51,38 @@ def setup_chrome_driver(headless=True):
     chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
     chrome_options.add_argument("--profile-directory=Default")
     
-    # Essential options for Render deployment
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--disable-software-rasterizer")
-    chrome_options.add_argument("--disable-background-timer-throttling")
-    chrome_options.add_argument("--disable-backgrounding-occluded-windows")
-    chrome_options.add_argument("--disable-renderer-backgrounding")
-    chrome_options.add_argument("--disable-features=TranslateUI")
-    chrome_options.add_argument("--disable-ipc-flooding-protection")
-    chrome_options.add_argument("--remote-debugging-port=9222")
-    chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("--disable-plugins")
-    chrome_options.add_argument("--disable-images")
-    chrome_options.add_argument("--disable-javascript")
-    chrome_options.add_argument("--disable-default-apps")
-    chrome_options.add_argument("--disable-sync")
-    chrome_options.add_argument("--disable-translate")
-    chrome_options.add_argument("--hide-scrollbars")
-    chrome_options.add_argument("--metrics-recording-only")
-    chrome_options.add_argument("--mute-audio")
-    chrome_options.add_argument("--no-default-browser-check")
-    chrome_options.add_argument("--no-first-run")
-    chrome_options.add_argument("--safebrowsing-disable-auto-update")
-    chrome_options.add_argument("--single-process")
-    chrome_options.add_argument("--disable-background-networking")
+    # Essential options for cloud deployment
+    if IS_CLOUD:
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--disable-software-rasterizer")
+        chrome_options.add_argument("--disable-background-timer-throttling")
+        chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+        chrome_options.add_argument("--disable-renderer-backgrounding")
+        chrome_options.add_argument("--disable-features=TranslateUI")
+        chrome_options.add_argument("--disable-ipc-flooding-protection")
+        chrome_options.add_argument("--remote-debugging-port=9222")
+        chrome_options.add_argument("--disable-extensions")
+        chrome_options.add_argument("--disable-plugins")
+        chrome_options.add_argument("--disable-default-apps")
+        chrome_options.add_argument("--disable-sync")
+        chrome_options.add_argument("--disable-translate")
+        chrome_options.add_argument("--hide-scrollbars")
+        chrome_options.add_argument("--metrics-recording-only")
+        chrome_options.add_argument("--mute-audio")
+        chrome_options.add_argument("--no-default-browser-check")
+        chrome_options.add_argument("--no-first-run")
+        chrome_options.add_argument("--safebrowsing-disable-auto-update")
+        chrome_options.add_argument("--single-process")
+        chrome_options.add_argument("--disable-background-networking")
+        chrome_options.add_argument("--memory-pressure-off")
+        chrome_options.add_argument("--max_old_space_size=2048")
     
-    # Headless mode (always true for cloud deployment)
-    if headless or os.getenv('RENDER'):  # Force headless on Render
+    # Force headless mode for cloud deployment
+    if headless or IS_CLOUD:
         chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--window-size=1920,1080")
-    
-    # Memory optimizations for cloud
-    chrome_options.add_argument("--memory-pressure-off")
-    chrome_options.add_argument("--max_old_space_size=2048")
-    chrome_options.add_argument("--disable-background-timer-throttling")
-    chrome_options.add_argument("--disable-renderer-backgrounding")
-    chrome_options.add_argument("--disable-backgrounding-occluded-windows")
     
     # Disable automation detection
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
@@ -100,20 +93,23 @@ def setup_chrome_driver(headless=True):
     chrome_options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     
     try:
-        # Use webdriver-manager for Chrome installation
-        from webdriver_manager.chrome import ChromeDriverManager
-        from selenium.webdriver.chrome.service import Service
-        
         # For cloud deployment, use specific Chrome binary path if available
         chrome_binary_path = os.getenv('GOOGLE_CHROME_BIN')
         if chrome_binary_path:
             chrome_options.binary_location = chrome_binary_path
         
-        # Install and get ChromeDriver path
-        chrome_driver_path = ChromeDriverManager().install()
-        service = Service(chrome_driver_path)
-        
-        driver = webdriver.Chrome(service=service, options=chrome_options)
+        # Try to use webdriver-manager first
+        try:
+            from webdriver_manager.chrome import ChromeDriverManager
+            from selenium.webdriver.chrome.service import Service
+            
+            chrome_driver_path = ChromeDriverManager().install()
+            service = Service(chrome_driver_path)
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+        except:
+            # Fallback: use system ChromeDriver
+            service = Service()
+            driver = webdriver.Chrome(service=service, options=chrome_options)
         
         # Additional settings to avoid detection
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
@@ -124,27 +120,20 @@ def setup_chrome_driver(headless=True):
         
     except Exception as e:
         print(f"Error setting up Chrome driver: {str(e)}")
-        # Fallback: try without webdriver-manager
-        try:
-            service = Service()
-            driver = webdriver.Chrome(service=service, options=chrome_options)
-            driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-            return driver
-        except Exception as fallback_error:
-            print(f"Fallback also failed: {str(fallback_error)}")
-            raise Exception(f"Could not initialize Chrome driver: {str(e)}")
-        
+        raise Exception(f"Could not initialize Chrome driver: {str(e)}")
+
+
 def authenticate_whatsapp():
     """Handle WhatsApp authentication with cloud-friendly approach"""
     driver = None
     try:
         print("🔓 WhatsApp authentication required!")
         
-        # For cloud deployment, we can't open visible browser
-        if os.getenv('RENDER'):
-            print("⚠️ Cloud deployment detected - authentication not possible in cloud environment")
-            print("📝 Please run this locally first to authenticate, then deploy")
-            return False, "Authentication not possible in cloud environment. Please authenticate locally first."
+        # For cloud deployment, skip authentication and assume session exists
+        if IS_CLOUD:
+            print("⚠️ Cloud deployment detected - skipping authentication")
+            print("📝 Assuming session already exists from local authentication")
+            return True, "Cloud deployment - assuming authenticated"
         
         print("🌐 Opening browser for QR code scanning...")
         
@@ -158,9 +147,8 @@ def authenticate_whatsapp():
         # Wait for authentication (up to 2 minutes)
         wait = WebDriverWait(driver, 120)
         
-        # Wait for the main interface to appear (try multiple selectors)
+        # Wait for any of these elements to indicate successful login
         try:
-            # Wait for any of these elements to indicate successful login
             wait.until(
                 lambda d: d.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-tab='3']") or
                          d.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-lexical-editor='true']") or
@@ -193,6 +181,7 @@ def authenticate_whatsapp():
             time.sleep(5)
             driver.quit()
 
+
 def update_session_status(session_id, status, progress=0, success=None, error=None):
     """Update session status"""
     if session_id in active_sessions:
@@ -211,6 +200,7 @@ def update_session_status(session_id, status, progress=0, success=None, error=No
         'progress': progress,
         'current_session_id': session_id
     })
+
 def send_whatsapp_message_background(phone_number, message, session_id):
     """Background function to send WhatsApp message with session persistence"""
     global sending_status
@@ -220,55 +210,72 @@ def send_whatsapp_message_background(phone_number, message, session_id):
         sending_status['is_sending'] = True
         update_session_status(session_id, 'Initializing...', 10)
         
-        # Check authentication status first
-        update_session_status(session_id, 'Checking authentication...', 15)
-        is_authenticated, auth_message = check_whatsapp_authentication()
-        
-        if not is_authenticated:
-            update_session_status(session_id, 'Authentication required. Opening browser for QR code...', 20)
-            
-            # Try to authenticate
-            auth_success, auth_result = authenticate_whatsapp()
-            if not auth_success:
-                update_session_status(session_id, f'Authentication failed: {auth_result}', 20, 
-                                    success=False, error=auth_result)
-                return False, f"Authentication failed: {auth_result}"
-            
-            update_session_status(session_id, 'Authentication successful! Proceeding...', 30)
+        # For cloud deployment, skip authentication check and proceed directly
+        if IS_CLOUD:
+            update_session_status(session_id, 'Cloud deployment - skipping auth check...', 20)
+            # Check if session folder exists
+            session_dir = os.path.join(os.getcwd(), "whatsapp_session")
+            if not os.path.exists(session_dir):
+                update_session_status(session_id, 'No session found. Please authenticate locally first.', 20,
+                                    success=False, error="No session found")
+                return False, "No session found. Please authenticate locally first."
         else:
-            update_session_status(session_id, 'Using existing session...', 25)
+            # Local deployment - check authentication
+            update_session_status(session_id, 'Checking authentication...', 15)
+            is_authenticated, auth_message = check_whatsapp_authentication()
+            
+            if not is_authenticated:
+                update_session_status(session_id, 'Authentication required. Opening browser for QR code...', 20)
+                
+                # Try to authenticate
+                auth_success, auth_result = authenticate_whatsapp()
+                if not auth_success:
+                    update_session_status(session_id, f'Authentication failed: {auth_result}', 20, 
+                                        success=False, error=auth_result)
+                    return False, f"Authentication failed: {auth_result}"
+                
+                update_session_status(session_id, 'Authentication successful! Proceeding...', 30)
+            else:
+                update_session_status(session_id, 'Using existing session...', 25)
         
-        # Setup driver with session persistence (can use headless since we're authenticated)
+        # Setup driver with session persistence (always use headless for message sending)
         update_session_status(session_id, 'Setting up Chrome driver...', 35)
-        driver = setup_chrome_driver(headless=True)  # Use headless since we have session
+        driver = setup_chrome_driver(headless=True)
         
         update_session_status(session_id, 'Loading WhatsApp Web...', 40)
         
-        # Navigate to WhatsApp Web first (without message in URL to avoid duplication)
+        # Navigate to WhatsApp Web first
         driver.get("https://web.whatsapp.com")
         
-        # Wait for WhatsApp to load
+        # Wait for WhatsApp to load - longer for cloud
+        wait_time = 10 if IS_CLOUD else 5
         update_session_status(session_id, 'Waiting for WhatsApp to load...', 45)
-        time.sleep(5)  # Reduced from 8 to 5 seconds
+        time.sleep(wait_time)
         
         # Check if we need to authenticate again (session might have expired)
         qr_elements = driver.find_elements(By.XPATH, "//div[@data-testid='qr-code']")
         if qr_elements:
-            update_session_status(session_id, 'Session expired. Re-authentication required...', 40)
-            driver.quit()
-            
-            # Re-authenticate
-            auth_success, auth_result = authenticate_whatsapp()
-            if not auth_success:
-                update_session_status(session_id, f'Re-authentication failed: {auth_result}', 40, 
-                                    success=False, error=auth_result)
-                return False, f"Re-authentication failed: {auth_result}"
-            
-            # Try again with new session
-            driver = setup_chrome_driver(headless=True)
-            driver.get("https://web.whatsapp.com")
-            time.sleep(5)
+            if IS_CLOUD:
+                update_session_status(session_id, 'Session expired in cloud. Please re-authenticate locally.', 40,
+                                    success=False, error="Session expired in cloud environment")
+                return False, "Session expired in cloud environment. Please re-authenticate locally."
+            else:
+                update_session_status(session_id, 'Session expired. Re-authentication required...', 40)
+                driver.quit()
+                
+                # Re-authenticate
+                auth_success, auth_result = authenticate_whatsapp()
+                if not auth_success:
+                    update_session_status(session_id, f'Re-authentication failed: {auth_result}', 40, 
+                                        success=False, error=auth_result)
+                    return False, f"Re-authentication failed: {auth_result}"
+                
+                # Try again with new session
+                driver = setup_chrome_driver(headless=True)
+                driver.get("https://web.whatsapp.com")
+                time.sleep(wait_time)
         
+        # Rest of the message sending logic remains the same...
         # Search for the contact using the search box
         update_session_status(session_id, 'Searching for contact...', 50)
         
@@ -279,7 +286,7 @@ def send_whatsapp_message_background(phone_number, message, session_id):
             "//div[contains(@class, 'copyable-text')][@contenteditable='true'][@data-tab='3']"
         ]
         
-        wait = WebDriverWait(driver, 20)
+        wait = WebDriverWait(driver, 30)  # Increased timeout for cloud
         search_box = None
         
         for selector in search_selectors:
@@ -299,11 +306,11 @@ def send_whatsapp_message_background(phone_number, message, session_id):
         time.sleep(1)
         search_box.clear()
         search_box.send_keys(phone_number)
-        time.sleep(2)
+        time.sleep(3)  # Increased wait time for cloud
         
         # Press Enter or click on the first result
         search_box.send_keys(Keys.ENTER)
-        time.sleep(3)
+        time.sleep(4)  # Increased wait time for cloud
         
         # Wait for chat to open and find message input
         update_session_status(session_id, 'Opening chat...', 70)
@@ -318,7 +325,7 @@ def send_whatsapp_message_background(phone_number, message, session_id):
             "//div[contains(@class, 'message-input')][@contenteditable='true']"
         ]
         
-        wait = WebDriverWait(driver, 20)
+        wait = WebDriverWait(driver, 30)  # Increased timeout for cloud
         for selector in message_selectors:
             try:
                 message_input = wait.until(EC.element_to_be_clickable((By.XPATH, selector)))
@@ -336,25 +343,26 @@ def send_whatsapp_message_background(phone_number, message, session_id):
         
         # Scroll to message input and click
         driver.execute_script("arguments[0].scrollIntoView(true);", message_input)
-        time.sleep(0.5)
-        message_input.click()
         time.sleep(1)
+        message_input.click()
+        time.sleep(2)  # Increased wait time for cloud
         
         # Clear any existing text completely
         message_input.send_keys(Keys.CONTROL + "a")  # Select all
-        time.sleep(0.5)
+        time.sleep(1)
         message_input.send_keys(Keys.DELETE)  # Delete selected text
-        time.sleep(0.5)
+        time.sleep(1)
         
         # Type the message
         message_input.send_keys(message)
-        time.sleep(1)
+        time.sleep(2)  # Increased wait time for cloud
         
         # Send the message by pressing Enter
         message_input.send_keys(Keys.ENTER)
         
-        # Wait to ensure message is sent
-        time.sleep(3)  # Reduced from 5 to 3 seconds
+        # Wait to ensure message is sent - longer for cloud
+        wait_time = 5 if IS_CLOUD else 3
+        time.sleep(wait_time)
         
         update_session_status(session_id, 'Message sent successfully!', 100, 
                             success=True, error=None)
@@ -475,6 +483,16 @@ def check_whatsapp_authentication():
     """Check if WhatsApp Web is authenticated using stored session"""
     driver = None
     try:
+        # For cloud deployment, always return True if session folder exists
+        if IS_CLOUD:
+            session_dir = os.path.join(os.getcwd(), "whatsapp_session")
+            if os.path.exists(session_dir):
+                print("✅ Cloud deployment - session folder exists")
+                return True, "Cloud deployment - assuming authenticated"
+            else:
+                print("❌ Cloud deployment - no session folder found")
+                return False, "No session found in cloud environment"
+        
         # Use headless mode for quick authentication check
         driver = setup_chrome_driver(headless=True)
         
@@ -529,7 +547,7 @@ def check_whatsapp_authentication():
                 driver.quit()
             except:
                 pass
-            
+
 @app.route('/api/auth-status', methods=['GET'])
 def api_auth_status():
     """Check WhatsApp authentication status"""
