@@ -13,7 +13,15 @@ import threading
 from datetime import datetime
 import json
 import uuid
+import platform
 
+
+# Environment detection
+IS_CLOUD = bool(os.getenv('RENDER') or os.getenv('HEROKU') or os.getenv('RAILWAY'))
+IS_LOCAL = not IS_CLOUD
+
+print(f"🌍 Environment: {'Cloud' if IS_CLOUD else 'Local'}")
+print(f"🖥️ Platform: {platform.system()}")
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -54,15 +62,34 @@ def setup_chrome_driver(headless=True):
     chrome_options.add_argument("--disable-renderer-backgrounding")
     chrome_options.add_argument("--disable-features=TranslateUI")
     chrome_options.add_argument("--disable-ipc-flooding-protection")
+    chrome_options.add_argument("--remote-debugging-port=9222")
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--disable-plugins")
+    chrome_options.add_argument("--disable-images")
+    chrome_options.add_argument("--disable-javascript")
+    chrome_options.add_argument("--disable-default-apps")
+    chrome_options.add_argument("--disable-sync")
+    chrome_options.add_argument("--disable-translate")
+    chrome_options.add_argument("--hide-scrollbars")
+    chrome_options.add_argument("--metrics-recording-only")
+    chrome_options.add_argument("--mute-audio")
+    chrome_options.add_argument("--no-default-browser-check")
+    chrome_options.add_argument("--no-first-run")
+    chrome_options.add_argument("--safebrowsing-disable-auto-update")
+    chrome_options.add_argument("--single-process")
+    chrome_options.add_argument("--disable-background-networking")
     
-    # Headless mode (can be toggled)
-    if headless:
-        chrome_options.add_argument("--headless")
+    # Headless mode (always true for cloud deployment)
+    if headless or os.getenv('RENDER'):  # Force headless on Render
+        chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--window-size=1920,1080")
     
-    # Memory optimizations
+    # Memory optimizations for cloud
     chrome_options.add_argument("--memory-pressure-off")
-    chrome_options.add_argument("--max_old_space_size=4096")
+    chrome_options.add_argument("--max_old_space_size=2048")
+    chrome_options.add_argument("--disable-background-timer-throttling")
+    chrome_options.add_argument("--disable-renderer-backgrounding")
+    chrome_options.add_argument("--disable-backgrounding-occluded-windows")
     
     # Disable automation detection
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
@@ -70,73 +97,55 @@ def setup_chrome_driver(headless=True):
     chrome_options.add_experimental_option('useAutomationExtension', False)
     
     # User agent
-    chrome_options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+    chrome_options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     
-    # Use webdriver-manager for Chrome installation
-    from webdriver_manager.chrome import ChromeDriverManager
-    from selenium.webdriver.chrome.service import Service
-    
-    service = Service(ChromeDriverManager().install())
-    
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-    
-    # Additional settings to avoid detection
-    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-    
-    return driver
-def check_whatsapp_authentication():
-    """Check if WhatsApp Web is authenticated using stored session"""
-    driver = None
     try:
-        # Use headless mode for quick authentication check
-        driver = setup_chrome_driver(headless=True)
-        driver.get("https://web.whatsapp.com")
+        # Use webdriver-manager for Chrome installation
+        from webdriver_manager.chrome import ChromeDriverManager
+        from selenium.webdriver.chrome.service import Service
         
-        # Wait for page to load
-        time.sleep(8)
+        # For cloud deployment, use specific Chrome binary path if available
+        chrome_binary_path = os.getenv('GOOGLE_CHROME_BIN')
+        if chrome_binary_path:
+            chrome_options.binary_location = chrome_binary_path
         
-        # Check multiple possible selectors for authentication
-        try:
-            # Wait for either QR code or main interface
-            WebDriverWait(driver, 20).until(
-                lambda d: d.find_elements(By.XPATH, "//div[@data-testid='qr-code']") or 
-                         d.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-tab='3']") or
-                         d.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-lexical-editor='true']") or
-                         d.find_elements(By.XPATH, "//div[@title='Search or start new chat']")
-            )
-        except:
-            return False, "Page not loading properly"
+        # Install and get ChromeDriver path
+        chrome_driver_path = ChromeDriverManager().install()
+        service = Service(chrome_driver_path)
         
-        # Check if QR code is present (means not authenticated)
-        qr_elements = driver.find_elements(By.XPATH, "//div[@data-testid='qr-code']")
-        if qr_elements:
-            return False, "Authentication required - QR code detected"
+        driver = webdriver.Chrome(service=service, options=chrome_options)
         
-        # Check for main chat interface (multiple selectors)
-        search_elements = (
-            driver.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-tab='3']") or
-            driver.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-lexical-editor='true']") or
-            driver.find_elements(By.XPATH, "//div[@title='Search or start new chat']") or
-            driver.find_elements(By.XPATH, "//div[contains(@class, 'copyable-text')][@contenteditable='true']")
-        )
+        # Additional settings to avoid detection
+        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        driver.execute_script("Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]})")
+        driver.execute_script("Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']})")
         
-        if search_elements:
-            return True, "Already authenticated - session active"
-        
-        return False, "Authentication status unclear"
+        return driver
         
     except Exception as e:
-        return False, f"Error checking authentication: {str(e)}"
-    finally:
-        if driver:
-            driver.quit()
-
-
+        print(f"Error setting up Chrome driver: {str(e)}")
+        # Fallback: try without webdriver-manager
+        try:
+            service = Service()
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+            driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            return driver
+        except Exception as fallback_error:
+            print(f"Fallback also failed: {str(fallback_error)}")
+            raise Exception(f"Could not initialize Chrome driver: {str(e)}")
+        
 def authenticate_whatsapp():
-    """Handle WhatsApp authentication with visible browser and session saving"""
+    """Handle WhatsApp authentication with cloud-friendly approach"""
     driver = None
     try:
         print("🔓 WhatsApp authentication required!")
+        
+        # For cloud deployment, we can't open visible browser
+        if os.getenv('RENDER'):
+            print("⚠️ Cloud deployment detected - authentication not possible in cloud environment")
+            print("📝 Please run this locally first to authenticate, then deploy")
+            return False, "Authentication not possible in cloud environment. Please authenticate locally first."
+        
         print("🌐 Opening browser for QR code scanning...")
         
         # Open browser in non-headless mode for QR scanning with session persistence
@@ -462,6 +471,65 @@ def api_authenticate():
             'authenticated': False
         }), 500
 
+def check_whatsapp_authentication():
+    """Check if WhatsApp Web is authenticated using stored session"""
+    driver = None
+    try:
+        # Use headless mode for quick authentication check
+        driver = setup_chrome_driver(headless=True)
+        
+        # Set longer timeout for cloud environments
+        timeout = 30 if IS_CLOUD else 20
+        
+        driver.set_page_load_timeout(timeout)
+        driver.get("https://web.whatsapp.com")
+        
+        # Wait for page to load - longer timeout for cloud
+        wait_time = 15 if IS_CLOUD else 8
+        time.sleep(wait_time)
+        
+        # Check multiple possible selectors for authentication
+        try:
+            # Wait for either QR code or main interface
+            WebDriverWait(driver, timeout).until(
+                lambda d: d.find_elements(By.XPATH, "//div[@data-testid='qr-code']") or 
+                         d.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-tab='3']") or
+                         d.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-lexical-editor='true']") or
+                         d.find_elements(By.XPATH, "//div[@title='Search or start new chat']")
+            )
+        except Exception as timeout_error:
+            print(f"Timeout waiting for page elements: {str(timeout_error)}")
+            return False, f"Page loading timeout: {str(timeout_error)}"
+        
+        # Check if QR code is present (means not authenticated)
+        qr_elements = driver.find_elements(By.XPATH, "//div[@data-testid='qr-code']")
+        if qr_elements:
+            return False, "Authentication required - QR code detected"
+        
+        # Check for main chat interface (multiple selectors)
+        search_elements = (
+            driver.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-tab='3']") or
+            driver.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-lexical-editor='true']") or
+            driver.find_elements(By.XPATH, "//div[@title='Search or start new chat']") or
+            driver.find_elements(By.XPATH, "//div[contains(@class, 'copyable-text')][@contenteditable='true']")
+        )
+        
+        if search_elements:
+            return True, "Already authenticated - session active"
+        
+        return False, "Authentication status unclear"
+        
+    except Exception as e:
+        error_msg = f"Error checking authentication: {str(e)}"
+        print(error_msg)
+        return False, error_msg
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except:
+                pass
+            
 @app.route('/api/auth-status', methods=['GET'])
 def api_auth_status():
     """Check WhatsApp authentication status"""
