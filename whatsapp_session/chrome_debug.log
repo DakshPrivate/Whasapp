@@ -1,0 +1,15 @@
+[13904:13908:0713/122332.848:INFO:components\enterprise\browser\controller\chrome_browser_cloud_management_controller.cc:202] No machine level policy manager exists.
+[13324:13416:0713/122332.991:VERBOSE1:components\viz\service\main\viz_main_impl.cc:86] VizNullHypothesis is disabled (not a warning)
+[13324:13416:0713/122332.994:ERROR:gpu\ipc\service\gpu_channel_manager.cc:946] Failed to create GLES3 context, fallback to GLES2.
+[13324:13416:0713/122332.995:ERROR:gpu\ipc\service\gpu_channel_manager.cc:957] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[13104:11732:0713/122333.354:INFO:third_party\webrtc\rtc_base\cpu_info.cc:57] Available number of cores: 12
+[9288:10252:0713/122333.381:INFO:third_party\webrtc\rtc_base\cpu_info.cc:57] Available number of cores: 12
+[13324:13416:0713/122333.418:ERROR:gpu\ipc\service\gpu_channel_manager.cc:946] Failed to create GLES3 context, fallback to GLES2.
+[13324:13416:0713/122333.419:ERROR:gpu\ipc\service\gpu_channel_manager.cc:957] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[13324:13416:0713/122333.420:ERROR:gpu\ipc\service\gpu_channel_manager.cc:946] Failed to create GLES3 context, fallback to GLES2.
+[13324:13416:0713/122333.421:ERROR:gpu\ipc\service\gpu_channel_manager.cc:957] ContextResult::kFatalFailure: Failed to create shared context for virtualization.
+[2724:8280:0713/122334.185:INFO:third_party\webrtc\rtc_base\cpu_info.cc:57] Available number of cores: 12
+[12780:3676:0713/122334.357:INFO:third_party\webrtc\rtc_base\cpu_info.cc:57] Available number of cores: 12
+[3844:7908:0713/122334.370:INFO:third_party\webrtc\rtc_base\cpu_info.cc:57] Available number of cores: 12
+[13904:13908:0713/122334.946:INFO:CONSOLE:163] "Event handler of 'x-storagemutated-1' event must be added on the initial evaluation of worker script.", source: https://static.whatsapp.net/rsrc.php/v4/yo/r/smcSMLP1hr1.js (163)
+[13632:13600:0713/122335.218:INFO:third_party\webrtc\rtc_base\cpu_info.cc:57] Available number of cores: 12

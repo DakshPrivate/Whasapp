@@ -14,6 +14,7 @@ from datetime import datetime
 import json
 import uuid
 
+
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
@@ -29,11 +30,21 @@ sending_status = {
 # Store session data
 active_sessions = {}
 
-def setup_chrome_driver():
-    """Setup Chrome driver for Render deployment"""
+import os
+
+def setup_chrome_driver(headless=True):
+    """Setup Chrome driver with persistent session for WhatsApp Web"""
     chrome_options = Options()
     
-    # Essential options for Render
+    # Create a persistent user data directory
+    user_data_dir = os.path.join(os.getcwd(), "whatsapp_session")
+    os.makedirs(user_data_dir, exist_ok=True)
+    
+    # Essential options for session persistence
+    chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
+    chrome_options.add_argument("--profile-directory=Default")
+    
+    # Essential options for Render deployment
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
@@ -44,8 +55,9 @@ def setup_chrome_driver():
     chrome_options.add_argument("--disable-features=TranslateUI")
     chrome_options.add_argument("--disable-ipc-flooding-protection")
     
-    # Headless mode (required for Render)
-    chrome_options.add_argument("--headless")
+    # Headless mode (can be toggled)
+    if headless:
+        chrome_options.add_argument("--headless")
     chrome_options.add_argument("--window-size=1920,1080")
     
     # Memory optimizations
@@ -66,7 +78,111 @@ def setup_chrome_driver():
     
     service = Service(ChromeDriverManager().install())
     
-    return webdriver.Chrome(service=service, options=chrome_options)
+    driver = webdriver.Chrome(service=service, options=chrome_options)
+    
+    # Additional settings to avoid detection
+    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    
+    return driver
+def check_whatsapp_authentication():
+    """Check if WhatsApp Web is authenticated using stored session"""
+    driver = None
+    try:
+        # Use headless mode for quick authentication check
+        driver = setup_chrome_driver(headless=True)
+        driver.get("https://web.whatsapp.com")
+        
+        # Wait for page to load
+        time.sleep(8)
+        
+        # Check multiple possible selectors for authentication
+        try:
+            # Wait for either QR code or main interface
+            WebDriverWait(driver, 20).until(
+                lambda d: d.find_elements(By.XPATH, "//div[@data-testid='qr-code']") or 
+                         d.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-tab='3']") or
+                         d.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-lexical-editor='true']") or
+                         d.find_elements(By.XPATH, "//div[@title='Search or start new chat']")
+            )
+        except:
+            return False, "Page not loading properly"
+        
+        # Check if QR code is present (means not authenticated)
+        qr_elements = driver.find_elements(By.XPATH, "//div[@data-testid='qr-code']")
+        if qr_elements:
+            return False, "Authentication required - QR code detected"
+        
+        # Check for main chat interface (multiple selectors)
+        search_elements = (
+            driver.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-tab='3']") or
+            driver.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-lexical-editor='true']") or
+            driver.find_elements(By.XPATH, "//div[@title='Search or start new chat']") or
+            driver.find_elements(By.XPATH, "//div[contains(@class, 'copyable-text')][@contenteditable='true']")
+        )
+        
+        if search_elements:
+            return True, "Already authenticated - session active"
+        
+        return False, "Authentication status unclear"
+        
+    except Exception as e:
+        return False, f"Error checking authentication: {str(e)}"
+    finally:
+        if driver:
+            driver.quit()
+
+
+def authenticate_whatsapp():
+    """Handle WhatsApp authentication with visible browser and session saving"""
+    driver = None
+    try:
+        print("🔓 WhatsApp authentication required!")
+        print("🌐 Opening browser for QR code scanning...")
+        
+        # Open browser in non-headless mode for QR scanning with session persistence
+        driver = setup_chrome_driver(headless=False)
+        driver.get("https://web.whatsapp.com")
+        
+        print("📱 Please scan the QR code in the opened browser window")
+        print("⏰ Waiting up to 120 seconds for authentication...")
+        
+        # Wait for authentication (up to 2 minutes)
+        wait = WebDriverWait(driver, 120)
+        
+        # Wait for the main interface to appear (try multiple selectors)
+        try:
+            # Wait for any of these elements to indicate successful login
+            wait.until(
+                lambda d: d.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-tab='3']") or
+                         d.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-lexical-editor='true']") or
+                         d.find_elements(By.XPATH, "//div[@title='Search or start new chat']") or
+                         d.find_elements(By.XPATH, "//div[contains(@class, 'copyable-text')][@contenteditable='true']")
+            )
+            
+            # Additional wait to ensure everything is loaded and session is saved
+            print("✅ Authentication successful! Saving session...")
+            time.sleep(10)  # Important: Give Chrome time to save the session
+            
+            # Navigate to a few pages to ensure session is properly saved
+            driver.get("https://web.whatsapp.com/")
+            time.sleep(3)
+            
+            print("✅ Session saved successfully!")
+            
+            return True, "Authentication successful"
+            
+        except Exception as e:
+            print("❌ Authentication timeout. Please try again.")
+            return False, "Authentication timeout"
+            
+    except Exception as e:
+        print(f"❌ Authentication error: {str(e)}")
+        return False, f"Authentication error: {str(e)}"
+    finally:
+        if driver:
+            # Give extra time for session to be saved before closing
+            time.sleep(5)
+            driver.quit()
 
 def update_session_status(session_id, status, progress=0, success=None, error=None):
     """Update session status"""
@@ -86,9 +202,8 @@ def update_session_status(session_id, status, progress=0, success=None, error=No
         'progress': progress,
         'current_session_id': session_id
     })
-
 def send_whatsapp_message_background(phone_number, message, session_id):
-    """Background function to send WhatsApp message"""
+    """Background function to send WhatsApp message with session persistence"""
     global sending_status
     driver = None
     
@@ -96,62 +211,141 @@ def send_whatsapp_message_background(phone_number, message, session_id):
         sending_status['is_sending'] = True
         update_session_status(session_id, 'Initializing...', 10)
         
-        # Setup Chrome driver
-        driver = setup_chrome_driver()
-        update_session_status(session_id, 'Chrome driver setup complete', 20)
+        # Check authentication status first
+        update_session_status(session_id, 'Checking authentication...', 15)
+        is_authenticated, auth_message = check_whatsapp_authentication()
         
-        # Open WhatsApp Web
+        if not is_authenticated:
+            update_session_status(session_id, 'Authentication required. Opening browser for QR code...', 20)
+            
+            # Try to authenticate
+            auth_success, auth_result = authenticate_whatsapp()
+            if not auth_success:
+                update_session_status(session_id, f'Authentication failed: {auth_result}', 20, 
+                                    success=False, error=auth_result)
+                return False, f"Authentication failed: {auth_result}"
+            
+            update_session_status(session_id, 'Authentication successful! Proceeding...', 30)
+        else:
+            update_session_status(session_id, 'Using existing session...', 25)
+        
+        # Setup driver with session persistence (can use headless since we're authenticated)
+        update_session_status(session_id, 'Setting up Chrome driver...', 35)
+        driver = setup_chrome_driver(headless=True)  # Use headless since we have session
+        
+        update_session_status(session_id, 'Loading WhatsApp Web...', 40)
+        
+        # Navigate to WhatsApp Web first (without message in URL to avoid duplication)
         driver.get("https://web.whatsapp.com")
-        update_session_status(session_id, 'Opening WhatsApp Web...', 30)
         
-        # Wait for WhatsApp Web to load
-        wait = WebDriverWait(driver, 60)
+        # Wait for WhatsApp to load
+        update_session_status(session_id, 'Waiting for WhatsApp to load...', 45)
+        time.sleep(5)  # Reduced from 8 to 5 seconds
         
-        try:
-            # Wait for the search box to be present (indicates WhatsApp is loaded)
-            search_box = wait.until(EC.presence_of_element_located((By.XPATH, "//div[@contenteditable='true'][@data-tab='3']")))
-            update_session_status(session_id, 'WhatsApp Web loaded successfully', 50)
-        except Exception as e:
-            update_session_status(session_id, 'WhatsApp Web not loaded. Please scan QR code first.', 30, 
-                                success=False, error='WhatsApp Web authentication required')
-            return False, "WhatsApp Web not loaded. Please scan QR code first."
+        # Check if we need to authenticate again (session might have expired)
+        qr_elements = driver.find_elements(By.XPATH, "//div[@data-testid='qr-code']")
+        if qr_elements:
+            update_session_status(session_id, 'Session expired. Re-authentication required...', 40)
+            driver.quit()
+            
+            # Re-authenticate
+            auth_success, auth_result = authenticate_whatsapp()
+            if not auth_success:
+                update_session_status(session_id, f'Re-authentication failed: {auth_result}', 40, 
+                                    success=False, error=auth_result)
+                return False, f"Re-authentication failed: {auth_result}"
+            
+            # Try again with new session
+            driver = setup_chrome_driver(headless=True)
+            driver.get("https://web.whatsapp.com")
+            time.sleep(5)
         
+        # Search for the contact using the search box
+        update_session_status(session_id, 'Searching for contact...', 50)
+        
+        # Find and click the search box
+        search_selectors = [
+            "//div[@contenteditable='true'][@data-tab='3']",
+            "//div[@title='Search or start new chat']",
+            "//div[contains(@class, 'copyable-text')][@contenteditable='true'][@data-tab='3']"
+        ]
+        
+        wait = WebDriverWait(driver, 20)
+        search_box = None
+        
+        for selector in search_selectors:
+            try:
+                search_box = wait.until(EC.element_to_be_clickable((By.XPATH, selector)))
+                break
+            except:
+                continue
+        
+        if not search_box:
+            update_session_status(session_id, 'Could not find search box', 50, 
+                                success=False, error='Could not find search box')
+            return False, "Could not find search box"
+        
+        # Click search box and enter phone number
+        search_box.click()
+        time.sleep(1)
+        search_box.clear()
+        search_box.send_keys(phone_number)
         time.sleep(2)
         
-        # Create WhatsApp message URL with phone number and message
-        encoded_message = urllib.parse.quote(message)
-        whatsapp_url = f"https://web.whatsapp.com/send?phone={phone_number}&text={encoded_message}"
+        # Press Enter or click on the first result
+        search_box.send_keys(Keys.ENTER)
+        time.sleep(3)
         
-        update_session_status(session_id, 'Opening chat...', 60)
+        # Wait for chat to open and find message input
+        update_session_status(session_id, 'Opening chat...', 70)
         
-        # Navigate to the specific chat
-        driver.get(whatsapp_url)
+        # Try multiple selectors for message input
+        message_input = None
+        message_selectors = [
+            "//div[@contenteditable='true'][@data-tab='10']",
+            "//div[@contenteditable='true'][@data-lexical-editor='true']",
+            "//div[@contenteditable='true'][contains(@class, 'copyable-text')][@data-tab='10']",
+            "//div[@title='Type a message']",
+            "//div[contains(@class, 'message-input')][@contenteditable='true']"
+        ]
         
-        # Wait for the message input box to be present
-        update_session_status(session_id, 'Waiting for message input...', 70)
-        
-        try:
-            message_input = wait.until(EC.presence_of_element_located((By.XPATH, "//div[@contenteditable='true'][@data-tab='10']")))
-        except Exception as e:
-            # Try alternative selectors
+        wait = WebDriverWait(driver, 20)
+        for selector in message_selectors:
             try:
-                message_input = wait.until(EC.presence_of_element_located((By.XPATH, "//div[@contenteditable='true'][@data-lexical-editor='true']")))
-            except Exception as e2:
-                update_session_status(session_id, 'Message input not found', 70, 
-                                    success=False, error='Could not find message input box')
-                return False, "Could not find message input box"
+                message_input = wait.until(EC.element_to_be_clickable((By.XPATH, selector)))
+                break
+            except:
+                continue
         
-        # Click on the message input box
+        if not message_input:
+            update_session_status(session_id, 'Message input not found. Chat may not exist or number invalid.', 70, 
+                                success=False, error='Could not find message input box')
+            return False, "Could not find message input box. Please check if the phone number has WhatsApp."
+        
+        # Send the message
+        update_session_status(session_id, 'Sending message...', 85)
+        
+        # Scroll to message input and click
+        driver.execute_script("arguments[0].scrollIntoView(true);", message_input)
+        time.sleep(0.5)
         message_input.click()
         time.sleep(1)
         
-        update_session_status(session_id, 'Sending message...', 80)
+        # Clear any existing text completely
+        message_input.send_keys(Keys.CONTROL + "a")  # Select all
+        time.sleep(0.5)
+        message_input.send_keys(Keys.DELETE)  # Delete selected text
+        time.sleep(0.5)
+        
+        # Type the message
+        message_input.send_keys(message)
+        time.sleep(1)
         
         # Send the message by pressing Enter
         message_input.send_keys(Keys.ENTER)
         
-        # Wait a bit to ensure message is sent
-        time.sleep(3)
+        # Wait to ensure message is sent
+        time.sleep(3)  # Reduced from 5 to 3 seconds
         
         update_session_status(session_id, 'Message sent successfully!', 100, 
                             success=True, error=None)
@@ -178,6 +372,114 @@ def send_whatsapp_message_background(phone_number, message, session_id):
                 del active_sessions[session_id]
         
         threading.Thread(target=cleanup_session, daemon=True).start()
+
+import shutil
+
+def clear_whatsapp_session():
+    """Clear the saved WhatsApp session - useful for troubleshooting"""
+    try:
+        session_dir = os.path.join(os.getcwd(), "whatsapp_session")
+        if os.path.exists(session_dir):
+            shutil.rmtree(session_dir)
+            print("✅ WhatsApp session cleared. You'll need to scan QR code again.")
+            return True, "Session cleared successfully"
+        else:
+            print("ℹ️ No session found to clear.")
+            return True, "No session found to clear"
+    except Exception as e:
+        print(f"❌ Error clearing session: {str(e)}")
+        return False, f"Error clearing session: {str(e)}"
+
+@app.route('/api/clear-session', methods=['POST'])
+def api_clear_session():
+    """API endpoint to clear WhatsApp session"""
+    try:
+        if sending_status['is_sending']:
+            return jsonify({
+                'success': False,
+                'error': 'Cannot clear session while sending message'
+            }), 429
+        
+        success, message = clear_whatsapp_session()
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': message
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'error': message
+            }), 400
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Server error: {str(e)}'
+        }), 500
+    
+@app.route('/api/authenticate', methods=['POST'])
+def api_authenticate():
+    """API endpoint to trigger WhatsApp authentication"""
+    try:
+        if sending_status['is_sending']:
+            return jsonify({
+                'success': False,
+                'error': 'Cannot authenticate while sending message'
+            }), 429
+        
+        # Check current authentication status
+        is_authenticated, auth_message = check_whatsapp_authentication()
+        
+        if is_authenticated:
+            return jsonify({
+                'success': True,
+                'message': 'Already authenticated',
+                'authenticated': True
+            }), 200
+        
+        # Trigger authentication
+        auth_success, auth_result = authenticate_whatsapp()
+        
+        if auth_success:
+            return jsonify({
+                'success': True,
+                'message': 'Authentication successful',
+                'authenticated': True
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'error': auth_result,
+                'authenticated': False
+            }), 400
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Server error: {str(e)}',
+            'authenticated': False
+        }), 500
+
+@app.route('/api/auth-status', methods=['GET'])
+def api_auth_status():
+    """Check WhatsApp authentication status"""
+    try:
+        is_authenticated, auth_message = check_whatsapp_authentication()
+        
+        return jsonify({
+            'success': True,
+            'authenticated': is_authenticated,
+            'message': auth_message
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Server error: {str(e)}',
+            'authenticated': False
+        }), 500
 
 # API Routes for Kotlin App
 @app.route('/api/send-message', methods=['POST'])
