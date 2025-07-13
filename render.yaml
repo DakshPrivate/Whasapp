@@ -1,9 +1,11 @@
 services:
   - type: web
-    name: whatsapp-api
+    name: whatsapp-sender
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
+    startCommand: python main.py
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.0
+      - key: GOOGLE_CHROME_BIN
+        value: /usr/bin/google-chrome
+      - key: CHROMEDRIVER_PATH
+        value: /usr/bin/chromedriver
