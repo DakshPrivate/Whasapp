@@ -60,7 +60,7 @@ def setup_chrome_driver(headless=True):
         chrome_options.add_argument("--disable-background-timer-throttling")
         chrome_options.add_argument("--disable-backgrounding-occluded-windows")
         chrome_options.add_argument("--disable-renderer-backgrounding")
-        chrome_options.add_argument("--disable-features=TranslateUI")
+        chrome_options.add_argument("--disable-features=TranslateUI,VizDisplayCompositor")
         chrome_options.add_argument("--disable-ipc-flooding-protection")
         chrome_options.add_argument("--remote-debugging-port=9222")
         chrome_options.add_argument("--disable-extensions")
@@ -74,11 +74,33 @@ def setup_chrome_driver(headless=True):
         chrome_options.add_argument("--no-default-browser-check")
         chrome_options.add_argument("--no-first-run")
         chrome_options.add_argument("--safebrowsing-disable-auto-update")
-        chrome_options.add_argument("--single-process")
         chrome_options.add_argument("--disable-background-networking")
-        chrome_options.add_argument("--memory-pressure-off")
-        chrome_options.add_argument("--max_old_space_size=2048")
-    
+        chrome_options.add_argument("--disable-web-security")
+        chrome_options.add_argument("--allow-running-insecure-content")
+        chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+        chrome_options.add_argument("--disable-logging")
+        chrome_options.add_argument("--disable-permissions-api")
+        chrome_options.add_argument("--disable-popup-blocking")
+        chrome_options.add_argument("--disable-prompt-on-repost")
+        chrome_options.add_argument("--disable-hang-monitor")
+        chrome_options.add_argument("--disable-client-side-phishing-detection")
+        chrome_options.add_argument("--disable-component-update")
+        chrome_options.add_argument("--disable-domain-reliability")
+        chrome_options.add_argument("--disable-features=AudioServiceOutOfProcess")
+        chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+        chrome_options.add_argument("--force-device-scale-factor=1")
+        chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+        
+        # Add prefs for better performance
+        chrome_options.add_experimental_option("prefs", {
+            "profile.default_content_setting_values.notifications": 2,
+            "profile.default_content_settings.popups": 0,
+            "profile.managed_default_content_settings.images": 2,
+            "profile.default_content_setting_values.plugins": 2,
+            "profile.managed_default_content_settings.plugins": 2,
+            "profile.default_content_setting_values.geolocation": 2,
+            "profile.default_content_setting_values.media_stream": 2,
+        })
     # Force headless mode for cloud deployment
     if headless or IS_CLOUD:
         chrome_options.add_argument("--headless=new")
@@ -250,8 +272,18 @@ def send_whatsapp_message_background(phone_number, message, session_id):
         # Wait for WhatsApp to load - longer for cloud
         wait_time = 10 if IS_CLOUD else 5
         update_session_status(session_id, 'Waiting for WhatsApp to load...', 45)
+        load_success, load_message = wait_for_whatsapp_load(driver, timeout=90 if IS_CLOUD else 60)
         time.sleep(wait_time)
         
+        if not load_success:
+            update_session_status(session_id, f'WhatsApp loading failed: {load_message}', 45, 
+                                success=False, error=load_message)
+            return False, f"WhatsApp loading failed: {load_message}"
+
+        # Additional wait for cloud environments
+        if IS_CLOUD:
+            time.sleep(wait_time + 5)  # Extra wait for cloud to ensure everything is loaded
+
         # Check if we need to authenticate again (session might have expired)
         qr_elements = driver.find_elements(By.XPATH, "//div[@data-testid='qr-code']")
         if qr_elements:
@@ -282,25 +314,53 @@ def send_whatsapp_message_background(phone_number, message, session_id):
         # Find and click the search box
         search_selectors = [
             "//div[@contenteditable='true'][@data-tab='3']",
+            "//div[@contenteditable='true'][@data-lexical-editor='true']",
             "//div[@title='Search or start new chat']",
-            "//div[contains(@class, 'copyable-text')][@contenteditable='true'][@data-tab='3']"
+            "//div[contains(@class, 'copyable-text')][@contenteditable='true'][@data-tab='3']",
+            "//div[contains(@class, '_13NKt')][@contenteditable='true']",
+            "//div[contains(@class, 'to2l77zo')][@contenteditable='true']",
+            "//div[contains(@class, 'selectable-text')][@contenteditable='true']",
+            "//div[@role='textbox'][@contenteditable='true']",
+            "//div[contains(@class, 'lexical-rich-text-input')][@contenteditable='true']",
+            "//div[contains(@aria-label, 'Search')][@contenteditable='true']",
+            "//div[contains(@placeholder, 'Search')][@contenteditable='true']",
+            "//input[@title='Search or start new chat']",
+            "//div[contains(@class, 'search')][@contenteditable='true']"
         ]
         
         wait = WebDriverWait(driver, 30)  # Increased timeout for cloud
         search_box = None
         
+        for i, selector in enumerate(search_selectors):
+            try:
+                print(f"Trying search selector {i+1}/{len(search_selectors)}: {selector}")
+                search_box = wait.until(EC.element_to_be_clickable((By.XPATH, selector)))
+                print(f"Found search box with selector: {selector}")
+                break
+            except Exception as e:
+                print(f"Selector {i+1} failed: {str(e)}")
+                continue
+
+
         for selector in search_selectors:
             try:
                 search_box = wait.until(EC.element_to_be_clickable((By.XPATH, selector)))
                 break
             except:
                 continue
-        
         if not search_box:
+            # Try to take a screenshot for debugging (if possible)
+            try:
+                screenshot_path = "/tmp/whatsapp_error.png"
+                driver.save_screenshot(screenshot_path)
+                print(f"Screenshot saved to: {screenshot_path}")
+            except:
+                pass
+            
             update_session_status(session_id, 'Could not find search box', 50, 
                                 success=False, error='Could not find search box')
             return False, "Could not find search box"
-        
+
         # Click search box and enter phone number
         search_box.click()
         time.sleep(1)
@@ -322,9 +382,16 @@ def send_whatsapp_message_background(phone_number, message, session_id):
             "//div[@contenteditable='true'][@data-lexical-editor='true']",
             "//div[@contenteditable='true'][contains(@class, 'copyable-text')][@data-tab='10']",
             "//div[@title='Type a message']",
-            "//div[contains(@class, 'message-input')][@contenteditable='true']"
+            "//div[contains(@class, 'message-input')][@contenteditable='true']",
+            "//div[contains(@class, 'to2l77zo')][@contenteditable='true'][@data-tab='10']",
+            "//div[contains(@class, 'selectable-text')][@contenteditable='true'][@data-tab='10']",
+            "//div[@role='textbox'][@contenteditable='true'][@data-tab='10']",
+            "//div[contains(@class, 'lexical-rich-text-input')][@contenteditable='true'][@data-tab='10']",
+            "//div[contains(@aria-label, 'Type a message')][@contenteditable='true']",
+            "//div[contains(@placeholder, 'Type a message')][@contenteditable='true']",
+            "//div[contains(@class, '_13NKt')][@contenteditable='true'][@data-tab='10']",
+            "//div[contains(@data-testid, 'conversation-compose-box-input')][@contenteditable='true']"
         ]
-        
         wait = WebDriverWait(driver, 30)  # Increased timeout for cloud
         for selector in message_selectors:
             try:
@@ -548,6 +615,42 @@ def check_whatsapp_authentication():
             except:
                 pass
 
+def wait_for_whatsapp_load(driver, timeout=60):
+    """Wait for WhatsApp to fully load with better error handling"""
+    try:
+        print("Waiting for WhatsApp to load...")
+        
+        # Wait for the main WhatsApp interface to load
+        wait = WebDriverWait(driver, timeout)
+        
+        # Check if QR code is present (not authenticated)
+        qr_elements = driver.find_elements(By.XPATH, "//div[@data-testid='qr-code']")
+        if qr_elements:
+            print("QR code detected - not authenticated")
+            return False, "QR code detected - authentication required"
+        
+        # Wait for search box to appear
+        search_present = wait.until(
+            EC.any_of(
+                EC.presence_of_element_located((By.XPATH, "//div[@contenteditable='true'][@data-tab='3']")),
+                EC.presence_of_element_located((By.XPATH, "//div[@contenteditable='true'][@data-lexical-editor='true']")),
+                EC.presence_of_element_located((By.XPATH, "//div[@title='Search or start new chat']")),
+                EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'to2l77zo')][@contenteditable='true']")),
+                EC.presence_of_element_located((By.XPATH, "//div[@role='textbox'][@contenteditable='true']"))
+            )
+        )
+        
+        if search_present:
+            print("WhatsApp loaded successfully")
+            return True, "WhatsApp loaded successfully"
+        else:
+            print("WhatsApp did not load properly")
+            return False, "WhatsApp did not load properly"
+            
+    except Exception as e:
+        print(f"Error waiting for WhatsApp to load: {str(e)}")
+        return False, f"Error waiting for WhatsApp to load: {str(e)}"
+    
 @app.route('/api/auth-status', methods=['GET'])
 def api_auth_status():
     """Check WhatsApp authentication status"""
