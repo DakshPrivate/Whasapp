@@ -16,9 +16,101 @@ import uuid
 import platform
 
 
-# Environment detection
+# Environment detection - Fixed to work consistently
 IS_CLOUD = bool(os.getenv('RENDER') or os.getenv('HEROKU') or os.getenv('RAILWAY') or os.getenv('VERCEL'))
 IS_LOCAL = not IS_CLOUD
+
+# Cookie-based session storage
+WHATSAPP_SESSION_KEY = 'whatsapp_session_cookies'
+SESSION_STORAGE_FILE = 'whatsapp_session_data.json'
+
+def save_session_cookies(driver):
+    """Save WhatsApp session cookies to file"""
+    try:
+        cookies = driver.get_cookies()
+        local_storage = driver.execute_script("return localStorage;")
+        session_storage = driver.execute_script("return sessionStorage;")
+        
+        session_data = {
+            'cookies': cookies,
+            'local_storage': local_storage,
+            'session_storage': session_storage,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        with open(SESSION_STORAGE_FILE, 'w') as f:
+            json.dump(session_data, f, indent=2)
+        
+        print("✅ Session cookies saved successfully!")
+        return True
+    except Exception as e:
+        print(f"❌ Error saving session cookies: {str(e)}")
+        return False
+
+def load_session_cookies(driver):
+    """Load WhatsApp session cookies from file"""
+    try:
+        if not os.path.exists(SESSION_STORAGE_FILE):
+            print("ℹ️ No session file found")
+            return False
+            
+        with open(SESSION_STORAGE_FILE, 'r') as f:
+            session_data = json.load(f)
+        
+        # Navigate to WhatsApp first
+        driver.get("https://web.whatsapp.com")
+        time.sleep(2)
+        
+        # Add cookies
+        for cookie in session_data.get('cookies', []):
+            try:
+                driver.add_cookie(cookie)
+            except Exception as e:
+                print(f"Could not add cookie: {str(e)}")
+        
+        # Restore local storage
+        local_storage = session_data.get('local_storage', {})
+        for key, value in local_storage.items():
+            try:
+                driver.execute_script(f"localStorage.setItem('{key}', '{value}');")
+            except Exception as e:
+                print(f"Could not restore localStorage item: {str(e)}")
+        
+        # Restore session storage
+        session_storage_data = session_data.get('session_storage', {})
+        for key, value in session_storage_data.items():
+            try:
+                driver.execute_script(f"sessionStorage.setItem('{key}', '{value}');")
+            except Exception as e:
+                print(f"Could not restore sessionStorage item: {str(e)}")
+        
+        print("✅ Session cookies loaded successfully!")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error loading session cookies: {str(e)}")
+        return False
+
+def is_session_valid():
+    """Check if saved session is still valid"""
+    try:
+        if not os.path.exists(SESSION_STORAGE_FILE):
+            return False
+            
+        with open(SESSION_STORAGE_FILE, 'r') as f:
+            session_data = json.load(f)
+        
+        # Check if session is older than 7 days
+        timestamp = datetime.fromisoformat(session_data.get('timestamp', datetime.now().isoformat()))
+        if (datetime.now() - timestamp).days > 7:
+            print("⚠️ Session is older than 7 days, may be expired")
+            return False
+            
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error checking session validity: {str(e)}")
+        return False
 
 print(f"🌍 Environment: {'Cloud' if IS_CLOUD else 'Local'}")
 print(f"🖥️ Platform: {platform.system()}")
@@ -39,17 +131,25 @@ sending_status = {
 active_sessions = {}
 
 import os
-def setup_chrome_driver(headless=True):
-    """Setup Chrome driver with persistent session for WhatsApp Web"""
+import base64
+import pickle
+
+def setup_chrome_driver(headless=True, use_session=True):
+    """Setup Chrome driver with cookie-based session management"""
     chrome_options = Options()
     
-    # Create a persistent user data directory
-    user_data_dir = os.path.join(os.getcwd(), "whatsapp_session")
-    os.makedirs(user_data_dir, exist_ok=True)
-    
-    # Essential options for session persistence
-    chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
-    chrome_options.add_argument("--profile-directory=Default")
+    # Create a temporary user data directory (we'll use cookies for persistence)
+    if use_session:
+        user_data_dir = os.path.join(os.getcwd(), "temp_chrome_session")
+        os.makedirs(user_data_dir, exist_ok=True)
+        chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
+        chrome_options.add_argument("--profile-directory=Default")
+    else:
+        # For QR code scanning, use a clean temporary profile
+        user_data_dir = os.path.join(os.getcwd(), "temp_qr_session")
+        os.makedirs(user_data_dir, exist_ok=True)
+        chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
+        chrome_options.add_argument("--profile-directory=QRAuth")
     
     # Essential options for cloud deployment
     if IS_CLOUD:
@@ -146,21 +246,15 @@ def setup_chrome_driver(headless=True):
 
 
 def authenticate_whatsapp():
-    """Handle WhatsApp authentication with cloud-friendly approach"""
+    """Handle WhatsApp authentication with cookie-based session management"""
     driver = None
     try:
         print("🔓 WhatsApp authentication required!")
         
-        # For cloud deployment, skip authentication and assume session exists
-        if IS_CLOUD:
-            print("⚠️ Cloud deployment detected - skipping authentication")
-            print("📝 Assuming session already exists from local authentication")
-            return True, "Cloud deployment - assuming authenticated"
-        
         print("🌐 Opening browser for QR code scanning...")
         
-        # Open browser in non-headless mode for QR scanning with session persistence
-        driver = setup_chrome_driver(headless=False)
+        # Open browser in non-headless mode for QR scanning
+        driver = setup_chrome_driver(headless=False, use_session=False)
         driver.get("https://web.whatsapp.com")
         
         print("📱 Please scan the QR code in the opened browser window")
@@ -178,17 +272,23 @@ def authenticate_whatsapp():
                          d.find_elements(By.XPATH, "//div[contains(@class, 'copyable-text')][@contenteditable='true']")
             )
             
-            # Additional wait to ensure everything is loaded and session is saved
-            print("✅ Authentication successful! Saving session...")
-            time.sleep(10)  # Important: Give Chrome time to save the session
+            # Additional wait to ensure everything is loaded
+            print("✅ Authentication successful! Saving session cookies...")
+            time.sleep(10)  # Important: Give WhatsApp time to fully load
             
-            # Navigate to a few pages to ensure session is properly saved
+            # Navigate to ensure session is fully established
             driver.get("https://web.whatsapp.com/")
-            time.sleep(3)
+            time.sleep(5)
             
-            print("✅ Session saved successfully!")
+            # Save session cookies
+            session_saved = save_session_cookies(driver)
             
-            return True, "Authentication successful"
+            if session_saved:
+                print("✅ Session cookies saved successfully!")
+                return True, "Authentication successful and session saved"
+            else:
+                print("⚠️ Authentication successful but session saving failed")
+                return True, "Authentication successful but session saving failed"
             
         except Exception as e:
             print("❌ Authentication timeout. Please try again.")
@@ -200,7 +300,7 @@ def authenticate_whatsapp():
     finally:
         if driver:
             # Give extra time for session to be saved before closing
-            time.sleep(5)
+            time.sleep(3)
             driver.quit()
 
 
