@@ -332,44 +332,40 @@ def send_whatsapp_message_background(phone_number, message, session_id):
         sending_status['is_sending'] = True
         update_session_status(session_id, 'Initializing...', 10)
         
-        # For cloud deployment, skip authentication check and proceed directly
-        if IS_CLOUD:
-            update_session_status(session_id, 'Cloud deployment - skipping auth check...', 20)
-            # Check if session folder exists
-            session_dir = os.path.join(os.getcwd(), "whatsapp_session")
-            if not os.path.exists(session_dir):
-                update_session_status(session_id, 'No session found. Please authenticate locally first.', 20,
-                                    success=False, error="No session found")
-                return False, "No session found. Please authenticate locally first."
-        else:
-            # Local deployment - check authentication
-            update_session_status(session_id, 'Checking authentication...', 15)
-            is_authenticated, auth_message = check_whatsapp_authentication()
+        # Check if we have a valid session
+        update_session_status(session_id, 'Checking for existing session...', 15)
+        
+        if not is_session_valid():
+            update_session_status(session_id, 'No valid session found. Authentication required...', 20)
             
-            if not is_authenticated:
-                update_session_status(session_id, 'Authentication required. Opening browser for QR code...', 20)
-                
-                # Try to authenticate
-                auth_success, auth_result = authenticate_whatsapp()
-                if not auth_success:
-                    update_session_status(session_id, f'Authentication failed: {auth_result}', 20, 
-                                        success=False, error=auth_result)
-                    return False, f"Authentication failed: {auth_result}"
-                
-                update_session_status(session_id, 'Authentication successful! Proceeding...', 30)
-            else:
-                update_session_status(session_id, 'Using existing session...', 25)
+            # Try to authenticate
+            auth_success, auth_result = authenticate_whatsapp()
+            if not auth_success:
+                update_session_status(session_id, f'Authentication failed: {auth_result}', 20, 
+                                    success=False, error=auth_result)
+                return False, f"Authentication failed: {auth_result}"
+            
+            update_session_status(session_id, 'Authentication successful! Proceeding...', 30)
+        else:
+            update_session_status(session_id, 'Using existing session...', 25)
         
         # Setup driver with session persistence (always use headless for message sending)
         update_session_status(session_id, 'Setting up Chrome driver...', 35)
         driver = setup_chrome_driver(headless=True)
         
-        update_session_status(session_id, 'Loading WhatsApp Web...', 40)
+        update_session_status(session_id, 'Loading saved session...', 40)
         
-        # Navigate to WhatsApp Web first
-        driver.get("https://web.whatsapp.com")
+        # Try to load existing session first
+        session_loaded = load_session_cookies(driver)
+        if not session_loaded:
+            update_session_status(session_id, 'Session loading failed, redirecting to WhatsApp...', 42)
+            driver.get("https://web.whatsapp.com")
+        else:
+            # Refresh the page to apply loaded session
+            driver.refresh()
+            time.sleep(3)
         
-        # Wait for WhatsApp to load - longer for cloud
+        # Wait for WhatsApp to load
         wait_time = 10 if IS_CLOUD else 5
         update_session_status(session_id, 'Waiting for WhatsApp to load...', 45)
         load_success, load_message = wait_for_whatsapp_load(driver, timeout=90 if IS_CLOUD else 60)
@@ -380,32 +376,24 @@ def send_whatsapp_message_background(phone_number, message, session_id):
                                 success=False, error=load_message)
             return False, f"WhatsApp loading failed: {load_message}"
 
-        # Additional wait for cloud environments
-        if IS_CLOUD:
-            time.sleep(wait_time + 5)  # Extra wait for cloud to ensure everything is loaded
-
         # Check if we need to authenticate again (session might have expired)
         qr_elements = driver.find_elements(By.XPATH, "//div[@data-testid='qr-code']")
         if qr_elements:
-            if IS_CLOUD:
-                update_session_status(session_id, 'Session expired in cloud. Please re-authenticate locally.', 40,
-                                    success=False, error="Session expired in cloud environment")
-                return False, "Session expired in cloud environment. Please re-authenticate locally."
-            else:
-                update_session_status(session_id, 'Session expired. Re-authentication required...', 40)
-                driver.quit()
-                
-                # Re-authenticate
-                auth_success, auth_result = authenticate_whatsapp()
-                if not auth_success:
-                    update_session_status(session_id, f'Re-authentication failed: {auth_result}', 40, 
-                                        success=False, error=auth_result)
-                    return False, f"Re-authentication failed: {auth_result}"
-                
-                # Try again with new session
-                driver = setup_chrome_driver(headless=True)
-                driver.get("https://web.whatsapp.com")
-                time.sleep(wait_time)
+            update_session_status(session_id, 'Session expired. Re-authentication required...', 40)
+            driver.quit()
+            
+            # Re-authenticate
+            auth_success, auth_result = authenticate_whatsapp()
+            if not auth_success:
+                update_session_status(session_id, f'Re-authentication failed: {auth_result}', 40, 
+                                    success=False, error=auth_result)
+                return False, f"Re-authentication failed: {auth_result}"
+            
+            # Try again with new session
+            driver = setup_chrome_driver(headless=True)
+            load_session_cookies(driver)
+            driver.refresh()
+            time.sleep(wait_time)
         
         # Rest of the message sending logic remains the same...
         # Search for the contact using the search box
