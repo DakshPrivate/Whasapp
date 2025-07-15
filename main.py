@@ -1,1689 +1,586 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for
-from flask_cors import CORS
+from flask import Flask, render_template, request, jsonify
+import os
+import time
 from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import TimeoutException, WebDriverException, NoSuchElementException
 from selenium.webdriver.common.keys import Keys
-import time
-import urllib.parse
-import os
+from selenium.webdriver.common.action_chains import ActionChains
 import threading
-from datetime import datetime
+import atexit
 import json
-import uuid
-import platform
+from urllib.parse import quote
+import logging
+import sys
+import pickle
+from pathlib import Path
 
-
-# Environment detection - Fixed to work consistently
-IS_CLOUD = bool(os.getenv('RENDER') or os.getenv('HEROKU') or os.getenv('RAILWAY') or os.getenv('VERCEL'))
-IS_LOCAL = not IS_CLOUD
-
-# Cookie-based session storage
-WHATSAPP_SESSION_KEY = 'whatsapp_session_cookies'
-SESSION_STORAGE_FILE = 'whatsapp_session_data.json'
-
-def save_session_cookies(driver):
-    """Save WhatsApp session cookies to file"""
-    try:
-        cookies = driver.get_cookies()
-        local_storage = driver.execute_script("return localStorage;")
-        session_storage = driver.execute_script("return sessionStorage;")
-        
-        session_data = {
-            'cookies': cookies,
-            'local_storage': local_storage,
-            'session_storage': session_storage,
-            'timestamp': datetime.now().isoformat()
-        }
-        
-        with open(SESSION_STORAGE_FILE, 'w') as f:
-            json.dump(session_data, f, indent=2)
-        
-        print("✅ Session cookies saved successfully!")
-        return True
-    except Exception as e:
-        print(f"❌ Error saving session cookies: {str(e)}")
-        return False
-
-def load_session_cookies(driver):
-    """Load WhatsApp session cookies from file"""
-    try:
-        if not os.path.exists(SESSION_STORAGE_FILE):
-            print("ℹ️ No session file found")
-            return False
-            
-        with open(SESSION_STORAGE_FILE, 'r') as f:
-            session_data = json.load(f)
-        
-        # Navigate to WhatsApp first
-        driver.get("https://web.whatsapp.com")
-        time.sleep(2)
-        
-        # Add cookies
-        for cookie in session_data.get('cookies', []):
-            try:
-                driver.add_cookie(cookie)
-            except Exception as e:
-                print(f"Could not add cookie: {str(e)}")
-        
-        # Restore local storage
-        local_storage = session_data.get('local_storage', {})
-        for key, value in local_storage.items():
-            try:
-                driver.execute_script(f"localStorage.setItem('{key}', '{value}');")
-            except Exception as e:
-                print(f"Could not restore localStorage item: {str(e)}")
-        
-        # Restore session storage
-        session_storage_data = session_data.get('session_storage', {})
-        for key, value in session_storage_data.items():
-            try:
-                driver.execute_script(f"sessionStorage.setItem('{key}', '{value}');")
-            except Exception as e:
-                print(f"Could not restore sessionStorage item: {str(e)}")
-        
-        print("✅ Session cookies loaded successfully!")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Error loading session cookies: {str(e)}")
-        return False
-
-def is_session_valid():
-    """Check if saved session is still valid"""
-    try:
-        if not os.path.exists(SESSION_STORAGE_FILE):
-            return False
-            
-        with open(SESSION_STORAGE_FILE, 'r') as f:
-            session_data = json.load(f)
-        
-        # Check if session is older than 7 days
-        timestamp = datetime.fromisoformat(session_data.get('timestamp', datetime.now().isoformat()))
-        if (datetime.now() - timestamp).days > 7:
-            print("⚠️ Session is older than 7 days, may be expired")
-            return False
-            
-        return True
-        
-    except Exception as e:
-        print(f"❌ Error checking session validity: {str(e)}")
-        return False
-
-print(f"🌍 Environment: {'Cloud' if IS_CLOUD else 'Local'}")
-print(f"🖥️ Platform: {platform.system()}")
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
 
-# Global variables to track sending status
-sending_status = {
-    'is_sending': False,
-    'status_message': 'Ready to send message',
-    'last_sent': None,
-    'current_session_id': None,
-    'progress': 0
-}
-
-# Store session data
-active_sessions = {}
-
-import os
-import base64
-import pickle
-
-def setup_chrome_driver(headless=True, use_session=True):
-    """Setup Chrome driver with cookie-based session management"""
-    chrome_options = Options()
-    
-    # Create a temporary user data directory (we'll use cookies for persistence)
-    if use_session:
-        user_data_dir = os.path.join(os.getcwd(), "temp_chrome_session")
-        os.makedirs(user_data_dir, exist_ok=True)
-        chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
-        chrome_options.add_argument("--profile-directory=Default")
-    else:
-        # For QR code scanning, use a clean temporary profile
-        user_data_dir = os.path.join(os.getcwd(), "temp_qr_session")
-        os.makedirs(user_data_dir, exist_ok=True)
-        chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
-        chrome_options.add_argument("--profile-directory=QRAuth")
-    
-    # Essential options for cloud deployment
-    if IS_CLOUD:
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--disable-software-rasterizer")
-        chrome_options.add_argument("--disable-background-timer-throttling")
-        chrome_options.add_argument("--disable-backgrounding-occluded-windows")
-        chrome_options.add_argument("--disable-renderer-backgrounding")
-        chrome_options.add_argument("--disable-features=TranslateUI,VizDisplayCompositor")
-        chrome_options.add_argument("--disable-ipc-flooding-protection")
-        chrome_options.add_argument("--remote-debugging-port=9222")
-        chrome_options.add_argument("--disable-extensions")
-        chrome_options.add_argument("--disable-plugins")
-        chrome_options.add_argument("--disable-default-apps")
-        chrome_options.add_argument("--disable-sync")
-        chrome_options.add_argument("--disable-translate")
-        chrome_options.add_argument("--hide-scrollbars")
-        chrome_options.add_argument("--metrics-recording-only")
-        chrome_options.add_argument("--mute-audio")
-        chrome_options.add_argument("--no-default-browser-check")
-        chrome_options.add_argument("--no-first-run")
-        chrome_options.add_argument("--safebrowsing-disable-auto-update")
-        chrome_options.add_argument("--disable-background-networking")
-        chrome_options.add_argument("--disable-web-security")
-        chrome_options.add_argument("--allow-running-insecure-content")
-        chrome_options.add_argument("--disable-features=VizDisplayCompositor")
-        chrome_options.add_argument("--disable-logging")
-        chrome_options.add_argument("--disable-permissions-api")
-        chrome_options.add_argument("--disable-popup-blocking")
-        chrome_options.add_argument("--disable-prompt-on-repost")
-        chrome_options.add_argument("--disable-hang-monitor")
-        chrome_options.add_argument("--disable-client-side-phishing-detection")
-        chrome_options.add_argument("--disable-component-update")
-        chrome_options.add_argument("--disable-domain-reliability")
-        chrome_options.add_argument("--disable-features=AudioServiceOutOfProcess")
-        chrome_options.add_argument("--disable-features=VizDisplayCompositor")
-        chrome_options.add_argument("--force-device-scale-factor=1")
-        chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+class WhatsAppBot:
+    def __init__(self):
+        self.driver = None
+        self.wait = None
+        self.is_logged_in = False
+        self.lock = threading.Lock()
+        self.session_file = "whatsapp_session.json"
+        self.user_data_dir = os.path.join(os.getcwd(), 'chrome_user_data')
+        self.cookies_file = "whatsapp_cookies.pkl"
+        self.last_phone_number = None  # Track last used number
         
-        # Add prefs for better performance
-        chrome_options.add_experimental_option("prefs", {
-            "profile.default_content_setting_values.notifications": 2,
-            "profile.default_content_settings.popups": 0,
-            "profile.managed_default_content_settings.images": 2,
-            "profile.default_content_setting_values.plugins": 2,
-            "profile.managed_default_content_settings.plugins": 2,
-            "profile.default_content_setting_values.geolocation": 2,
-            "profile.default_content_setting_values.media_stream": 2,
-        })
-    # Force headless mode for cloud deployment
-    if headless or IS_CLOUD:
-        chrome_options.add_argument("--headless=new")
-    chrome_options.add_argument("--window-size=1920,1080")
-    
-    # Disable automation detection
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
-    
-    # User agent
-    chrome_options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-    
-    try:
-        # For cloud deployment, use specific Chrome binary path if available
-        chrome_binary_path = os.getenv('GOOGLE_CHROME_BIN')
-        if chrome_binary_path:
-            chrome_options.binary_location = chrome_binary_path
+    def setup_driver(self):
+        """Setup Chrome driver optimized for speed and session persistence"""
+        options = Options()
         
-        # Try to use webdriver-manager first
+        # Essential options for stability
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--disable-gpu')
+        options.add_argument('--disable-software-rasterizer')
+        options.add_argument('--window-size=1920,1080')
+        
+        # SPEED OPTIMIZATIONS
+        options.add_argument('--disable-images')
+        # options.add_argument('--disable-javascript')  # Commented out as WhatsApp needs JS
+        options.add_argument('--disable-plugins')
+        options.add_argument('--disable-extensions')
+        options.add_argument('--disable-background-timer-throttling')
+        options.add_argument('--disable-backgrounding-occluded-windows')
+        options.add_argument('--disable-renderer-backgrounding')
+        options.add_argument('--disable-features=TranslateUI')
+        options.add_argument('--disable-default-apps')
+        options.add_argument('--no-default-browser-check')
+        options.add_argument('--disable-hang-monitor')
+        options.add_argument('--disable-prompt-on-repost')
+        options.add_argument('--disable-sync')
+        options.add_argument('--disable-web-security')
+        options.add_argument('--disable-features=VizDisplayCompositor')
+        
+        # Check if running in cloud environment
+        is_cloud = os.environ.get('RENDER') or os.environ.get('HEROKU') or os.environ.get('RAILWAY')
+        
+        if is_cloud:
+            # Cloud-specific options
+            options.add_argument('--headless')
+            print("Running in cloud mode (headless)")
+        else:
+            # Local development - show browser window
+            print("Running in local mode (with browser window)")
+        
+        # Performance optimizations
+        options.add_argument('--aggressive-cache-discard')
+        options.add_argument('--memory-pressure-off')
+        options.add_argument('--max_old_space_size=4096')
+        
+        # Anti-detection
+        options.add_argument('--disable-blink-features=AutomationControlled')
+        options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        options.add_experimental_option('useAutomationExtension', False)
+        
+        # Session persistence
+        if not os.path.exists(self.user_data_dir):
+            os.makedirs(self.user_data_dir)
+        
+        options.add_argument(f'--user-data-dir={self.user_data_dir}')
+        options.add_argument('--profile-directory=WhatsAppBot')
+        
+        # Don't clear data on startup
+        options.add_argument('--disable-session-crashed-bubble')
+        options.add_argument('--disable-infobars')
+        options.add_argument('--disable-restore-session-state')
+        
+        # Add flags to preserve session
+        options.add_argument('--keep-alive-for-test')
+        
         try:
-            from webdriver_manager.chrome import ChromeDriverManager
-            from selenium.webdriver.chrome.service import Service
+            self.driver = webdriver.Chrome(options=options)
+            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            # Reduce wait time for faster operations
+            self.wait = WebDriverWait(self.driver, 10)
             
-            chrome_driver_path = ChromeDriverManager().install()
-            service = Service(chrome_driver_path)
-            driver = webdriver.Chrome(service=service, options=chrome_options)
+            # Load saved cookies if they exist
+            self.load_cookies()
+            
+            logger.info("Chrome driver setup successful")
+            return True
+        except Exception as e:
+            logger.error(f"Error setting up driver: {e}")
+            print(f"Error setting up driver: {e}")
+            return False
+    
+    def save_cookies(self):
+        """Save cookies to maintain session"""
+        try:
+            if self.driver:
+                cookies = self.driver.get_cookies()
+                with open(self.cookies_file, 'wb') as f:
+                    pickle.dump(cookies, f)
+                logger.info("Cookies saved successfully")
+        except Exception as e:
+            logger.error(f"Error saving cookies: {e}")
+    
+    def load_cookies(self):
+        """Load saved cookies"""
+        try:
+            if os.path.exists(self.cookies_file) and self.driver:
+                # First navigate to WhatsApp domain
+                self.driver.get("https://web.whatsapp.com")
+                time.sleep(1)
+                
+                with open(self.cookies_file, 'rb') as f:
+                    cookies = pickle.load(f)
+                
+                for cookie in cookies:
+                    try:
+                        self.driver.add_cookie(cookie)
+                    except Exception as e:
+                        logger.warning(f"Could not add cookie: {e}")
+                
+                logger.info("Cookies loaded successfully")
+        except Exception as e:
+            logger.error(f"Error loading cookies: {e}")
+    
+    def is_whatsapp_loaded(self):
+        """Check if WhatsApp is loaded and ready"""
+        try:
+            indicators = [
+                "[data-testid='side']",
+                "#side",
+                "div[data-testid='chat-list']",
+                "header[data-testid='chatlist-header']",
+                "[data-testid='chat-list-search']"
+            ]
+            
+            for indicator in indicators:
+                if self.driver.find_elements(By.CSS_SELECTOR, indicator):
+                    return True
+            return False
         except:
-            # Fallback: use system ChromeDriver
-            service = Service()
-            driver = webdriver.Chrome(service=service, options=chrome_options)
-        
-        # Additional settings to avoid detection
-        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        driver.execute_script("Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]})")
-        driver.execute_script("Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']})")
-        
-        return driver
-        
-    except Exception as e:
-        print(f"Error setting up Chrome driver: {str(e)}")
-        raise Exception(f"Could not initialize Chrome driver: {str(e)}")
-
-
-def authenticate_whatsapp():
-    """Handle WhatsApp authentication with cookie-based session management"""
-    driver = None
-    try:
-        print("🔓 WhatsApp authentication required!")
-        
-        print("🌐 Opening browser for QR code scanning...")
-        
-        # Open browser in non-headless mode for QR scanning
-        driver = setup_chrome_driver(headless=False, use_session=False)
-        driver.get("https://web.whatsapp.com")
-        
-        print("📱 Please scan the QR code in the opened browser window")
-        print("⏰ Waiting up to 120 seconds for authentication...")
-        
-        # Wait for authentication (up to 2 minutes)
-        wait = WebDriverWait(driver, 120)
-        
-        # Wait for any of these elements to indicate successful login
+            return False
+    
+    def quick_login_check(self):
+        """Enhanced login status check"""
         try:
-            wait.until(
-                lambda d: d.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-tab='3']") or
-                         d.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-lexical-editor='true']") or
-                         d.find_elements(By.XPATH, "//div[@title='Search or start new chat']") or
-                         d.find_elements(By.XPATH, "//div[contains(@class, 'copyable-text')][@contenteditable='true']")
-            )
+            current_url = self.driver.current_url
+            if "web.whatsapp.com" in current_url:
+                logged_in_indicators = [
+                    "[data-testid='side']",
+                    "[data-testid='chat-list']",
+                    "div[data-testid='chatlist-header']",
+                    "#side",
+                    "div[role='textbox']"
+                ]
+                
+                for indicator in logged_in_indicators:
+                    if self.driver.find_elements(By.CSS_SELECTOR, indicator):
+                        return True
+                
+                qr_indicators = [
+                    "[data-testid='qr-code']",
+                    "canvas[role='img']",
+                    "canvas"
+                ]
+                
+                for qr_indicator in qr_indicators:
+                    if self.driver.find_elements(By.CSS_SELECTOR, qr_indicator):
+                        return False
+                
+                return True
             
-            # Additional wait to ensure everything is loaded
-            print("✅ Authentication successful! Saving session cookies...")
-            time.sleep(10)  # Important: Give WhatsApp time to fully load
+            return False
+        except Exception as e:
+            logger.error(f"Error in quick_login_check: {e}")
+            return False
+    
+    def ensure_logged_in(self):
+        """Ensure we're logged in with better session handling"""
+        try:
+            if not self.driver:
+                if not self.setup_driver():
+                    return False, "Failed to setup Chrome driver"
             
-            # Navigate to ensure session is fully established
-            driver.get("https://web.whatsapp.com/")
-            time.sleep(5)
+            current_url = self.driver.current_url if self.driver else ""
             
-            # Save session cookies
-            session_saved = save_session_cookies(driver)
+            if "web.whatsapp.com" in current_url:
+                if self.quick_login_check():
+                    self.is_logged_in = True
+                    return True, "Already logged in"
             
-            if session_saved:
-                print("✅ Session cookies saved successfully!")
-                return True, "Authentication successful and session saved"
-            else:
-                print("⚠️ Authentication successful but session saving failed")
-                return True, "Authentication successful but session saving failed"
+            if "web.whatsapp.com" not in current_url:
+                logger.info("Navigating to WhatsApp Web...")
+                self.driver.get("https://web.whatsapp.com")
+                time.sleep(2)
+            
+            if self.quick_login_check():
+                self.is_logged_in = True
+                self.save_cookies()
+                return True, "Logged in successfully"
+            
+            qr_present = False
+            qr_selectors = [
+                "[data-testid='qr-code']",
+                "canvas[role='img']",
+                "canvas"
+            ]
+            
+            for selector in qr_selectors:
+                if self.driver.find_elements(By.CSS_SELECTOR, selector):
+                    qr_present = True
+                    break
+            
+            if qr_present:
+                return False, "Please scan QR code in browser to login"
+            
+            time.sleep(1)
+            if self.quick_login_check():
+                self.is_logged_in = True
+                self.save_cookies()
+                return True, "Logged in successfully after wait"
+            
+            return False, "Login status unclear - please check browser window"
             
         except Exception as e:
-            print("❌ Authentication timeout. Please try again.")
-            return False, "Authentication timeout"
-            
-    except Exception as e:
-        print(f"❌ Authentication error: {str(e)}")
-        return False, f"Authentication error: {str(e)}"
-    finally:
-        if driver:
-            # Give extra time for session to be saved before closing
-            time.sleep(3)
-            driver.quit()
-
-
-def update_session_status(session_id, status, progress=0, success=None, error=None):
-    """Update session status"""
-    if session_id in active_sessions:
-        active_sessions[session_id].update({
-            'status': status,
-            'progress': progress,
-            'timestamp': datetime.now().isoformat(),
-            'success': success,
-            'error': error
-        })
+            logger.error(f"Error in ensure_logged_in: {e}")
+            return False, f"Login error: {str(e)}"
     
-    # Update global status
-    global sending_status
-    sending_status.update({
-        'status_message': status,
-        'progress': progress,
-        'current_session_id': session_id
-    })
-
-def send_whatsapp_message_background(phone_number, message, session_id):
-    """Background function to send WhatsApp message with session persistence"""
-    global sending_status
-    driver = None
-    
-    try:
-        sending_status['is_sending'] = True
-        update_session_status(session_id, 'Initializing...', 10)
-        
-        # Check if we have a valid session
-        update_session_status(session_id, 'Checking for existing session...', 15)
-        
-        if not is_session_valid():
-            update_session_status(session_id, 'No valid session found. Authentication required...', 20)
-            
-            # Try to authenticate
-            auth_success, auth_result = authenticate_whatsapp()
-            if not auth_success:
-                update_session_status(session_id, f'Authentication failed: {auth_result}', 20, 
-                                    success=False, error=auth_result)
-                return False, f"Authentication failed: {auth_result}"
-            
-            update_session_status(session_id, 'Authentication successful! Proceeding...', 30)
-        else:
-            update_session_status(session_id, 'Using existing session...', 25)
-        
-        # Setup driver with session persistence (always use headless for message sending)
-        update_session_status(session_id, 'Setting up Chrome driver...', 35)
-        driver = setup_chrome_driver(headless=True)
-        
-        update_session_status(session_id, 'Loading saved session...', 40)
-        
-        # Try to load existing session first
-        session_loaded = load_session_cookies(driver)
-        if not session_loaded:
-            update_session_status(session_id, 'Session loading failed, redirecting to WhatsApp...', 42)
-            driver.get("https://web.whatsapp.com")
-        else:
-            # Refresh the page to apply loaded session
-            driver.refresh()
-            time.sleep(3)
-        
-        # Wait for WhatsApp to load
-        wait_time = 10 if IS_CLOUD else 5
-        update_session_status(session_id, 'Waiting for WhatsApp to load...', 45)
-        load_success, load_message = wait_for_whatsapp_load(driver, timeout=90 if IS_CLOUD else 60)
-        time.sleep(wait_time)
-        
-        if not load_success:
-            update_session_status(session_id, f'WhatsApp loading failed: {load_message}', 45, 
-                                success=False, error=load_message)
-            return False, f"WhatsApp loading failed: {load_message}"
-
-        # Check if we need to authenticate again (session might have expired)
-        qr_elements = driver.find_elements(By.XPATH, "//div[@data-testid='qr-code']")
-        if qr_elements:
-            update_session_status(session_id, 'Session expired. Re-authentication required...', 40)
-            driver.quit()
-            
-            # Re-authenticate
-            auth_success, auth_result = authenticate_whatsapp()
-            if not auth_success:
-                update_session_status(session_id, f'Re-authentication failed: {auth_result}', 40, 
-                                    success=False, error=auth_result)
-                return False, f"Re-authentication failed: {auth_result}"
-            
-            # Try again with new session
-            driver = setup_chrome_driver(headless=True)
-            load_session_cookies(driver)
-            driver.refresh()
-            time.sleep(wait_time)
-        
-        # Rest of the message sending logic remains the same...
-        # Search for the contact using the search box
-        update_session_status(session_id, 'Searching for contact...', 50)
-        
-        # Find and click the search box
-        search_selectors = [
-            "//div[@contenteditable='true'][@data-tab='3']",
-            "//div[@contenteditable='true'][@data-lexical-editor='true']",
-            "//div[@title='Search or start new chat']",
-            "//div[contains(@class, 'copyable-text')][@contenteditable='true'][@data-tab='3']",
-            "//div[contains(@class, '_13NKt')][@contenteditable='true']",
-            "//div[contains(@class, 'to2l77zo')][@contenteditable='true']",
-            "//div[contains(@class, 'selectable-text')][@contenteditable='true']",
-            "//div[@role='textbox'][@contenteditable='true']",
-            "//div[contains(@class, 'lexical-rich-text-input')][@contenteditable='true']",
-            "//div[contains(@aria-label, 'Search')][@contenteditable='true']",
-            "//div[contains(@placeholder, 'Search')][@contenteditable='true']",
-            "//input[@title='Search or start new chat']",
-            "//div[contains(@class, 'search')][@contenteditable='true']"
-        ]
-        
-        wait = WebDriverWait(driver, 30)  # Increased timeout for cloud
-        search_box = None
-        
-        for i, selector in enumerate(search_selectors):
+    def send_message(self, phone_number, message):
+        """FIXED: Main message sending method with proper phone number handling"""
+        with self.lock:
             try:
-                print(f"Trying search selector {i+1}/{len(search_selectors)}: {selector}")
-                search_box = wait.until(EC.element_to_be_clickable((By.XPATH, selector)))
-                print(f"Found search box with selector: {selector}")
-                break
+                # Validate phone number first
+                if not phone_number or not phone_number.strip():
+                    return False, "Phone number is required"
+                
+                phone_number = phone_number.strip()
+                
+                # Ensure we have a driver and are logged in
+                login_success, login_msg = self.ensure_logged_in()
+                
+                if not login_success:
+                    return False, login_msg
+                
+                # ALWAYS use the API URL method to ensure we go to the correct chat
+                clean_number = phone_number.replace("+", "").replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+                encoded_message = quote(message)
+                api_url = f"https://web.whatsapp.com/send?phone={clean_number}&text={encoded_message}"
+                
+                logger.info(f"Navigating to: {api_url}")
+                print(f"Sending message to: {phone_number}")
+                print(f"Clean number: {clean_number}")
+                print(f"URL: {api_url}")
+                
+                # Navigate to the specific chat
+                self.driver.get(api_url)
+                time.sleep(2)  # Wait for page to load
+                
+                # Check if we're still logged in
+                if not self.quick_login_check():
+                    return False, "Lost login session - please login again"
+                
+                # Wait for the message to be populated in the input field
+                time.sleep(1)
+                
+                # Try to find and click the send button
+                send_button = None
+                send_selectors = [
+                    "[data-testid='send']",
+                    "[data-icon='send']",
+                    "button[data-testid='send']",
+                    "span[data-testid='send']"
+                ]
+                
+                # Wait for send button to be available
+                max_wait = 8
+                wait_interval = 0.5
+                elapsed = 0
+                
+                while elapsed < max_wait and not send_button:
+                    for selector in send_selectors:
+                        elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                        if elements and elements[0].is_enabled():
+                            send_button = elements[0]
+                            break
+                    
+                    if not send_button:
+                        time.sleep(wait_interval)
+                        elapsed += wait_interval
+                
+                if send_button:
+                    # Use JavaScript click for reliability
+                    self.driver.execute_script("arguments[0].click();", send_button)
+                    time.sleep(0.5)
+                    
+                    # Update last used number
+                    self.last_phone_number = phone_number
+                    
+                    # Save cookies after successful message
+                    self.save_cookies()
+                    
+                    logger.info(f"Message sent successfully to {phone_number}")
+                    return True, f"Message sent successfully to {phone_number}"
+                
+                # Fallback: Try using Enter key
+                try:
+                    # Find message input and send with Enter
+                    message_input_selectors = [
+                        "[data-testid='conversation-compose-box-input']",
+                        "div[contenteditable='true'][data-tab='10']",
+                        "[data-testid='compose-box-input']"
+                    ]
+                    
+                    for selector in message_input_selectors:
+                        try:
+                            message_input = self.driver.find_element(By.CSS_SELECTOR, selector)
+                            if message_input:
+                                message_input.click()
+                                time.sleep(0.2)
+                                message_input.send_keys(Keys.ENTER)
+                                time.sleep(0.5)
+                                
+                                self.last_phone_number = phone_number
+                                self.save_cookies()
+                                
+                                logger.info(f"Message sent via Enter key to {phone_number}")
+                                return True, f"Message sent successfully to {phone_number}"
+                        except:
+                            continue
+                    
+                    return False, "Could not send message - send button not found and Enter key failed"
+                    
+                except Exception as fallback_error:
+                    logger.error(f"Fallback method failed: {fallback_error}")
+                    return False, f"Could not send message: {str(fallback_error)}"
+                
             except Exception as e:
-                print(f"Selector {i+1} failed: {str(e)}")
-                continue
-
-
-        for selector in search_selectors:
-            try:
-                search_box = wait.until(EC.element_to_be_clickable((By.XPATH, selector)))
-                break
-            except:
-                continue
-        if not search_box:
-            # Try to take a screenshot for debugging (if possible)
-            try:
-                screenshot_path = "/tmp/whatsapp_error.png"
-                driver.save_screenshot(screenshot_path)
-                print(f"Screenshot saved to: {screenshot_path}")
-            except:
-                pass
+                logger.error(f"Error in send_message: {e}")
+                return False, f"Error: {str(e)}"
+    
+    def get_qr_code(self):
+        """Get QR code for manual scanning with better detection"""
+        try:
+            if not self.driver:
+                if not self.setup_driver():
+                    return False, "Failed to setup driver"
             
-            update_session_status(session_id, 'Could not find search box', 50, 
-                                success=False, error='Could not find search box')
-            return False, "Could not find search box"
-
-        # Click search box and enter phone number
-        search_box.click()
-        time.sleep(1)
-        search_box.clear()
-        search_box.send_keys(phone_number)
-        time.sleep(3)  # Increased wait time for cloud
-        
-        # Press Enter or click on the first result
-        search_box.send_keys(Keys.ENTER)
-        time.sleep(4)  # Increased wait time for cloud
-        
-        # Wait for chat to open and find message input
-        update_session_status(session_id, 'Opening chat...', 70)
-        
-        # Try multiple selectors for message input
-        message_input = None
-        message_selectors = [
-            "//div[@contenteditable='true'][@data-tab='10']",
-            "//div[@contenteditable='true'][@data-lexical-editor='true']",
-            "//div[@contenteditable='true'][contains(@class, 'copyable-text')][@data-tab='10']",
-            "//div[@title='Type a message']",
-            "//div[contains(@class, 'message-input')][@contenteditable='true']",
-            "//div[contains(@class, 'to2l77zo')][@contenteditable='true'][@data-tab='10']",
-            "//div[contains(@class, 'selectable-text')][@contenteditable='true'][@data-tab='10']",
-            "//div[@role='textbox'][@contenteditable='true'][@data-tab='10']",
-            "//div[contains(@class, 'lexical-rich-text-input')][@contenteditable='true'][@data-tab='10']",
-            "//div[contains(@aria-label, 'Type a message')][@contenteditable='true']",
-            "//div[contains(@placeholder, 'Type a message')][@contenteditable='true']",
-            "//div[contains(@class, '_13NKt')][@contenteditable='true'][@data-tab='10']",
-            "//div[contains(@data-testid, 'conversation-compose-box-input')][@contenteditable='true']"
-        ]
-        wait = WebDriverWait(driver, 30)  # Increased timeout for cloud
-        for selector in message_selectors:
+            print("Loading WhatsApp Web...")
+            self.driver.get("https://web.whatsapp.com")
+            time.sleep(3)
+            
+            if self.quick_login_check():
+                self.is_logged_in = True
+                self.save_cookies()
+                return True, "Already logged in - no QR code needed"
+            
+            qr_found = False
+            qr_selectors = [
+                "[data-testid='qr-code']",
+                "canvas[role='img']",
+                "canvas",
+                "div[data-ref]",
+                ".qr-code"
+            ]
+            
+            for selector in qr_selectors:
+                elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                if elements:
+                    print(f"QR code found with selector: {selector}")
+                    qr_found = True
+                    break
+            
+            if not qr_found:
+                time.sleep(2)
+                for selector in qr_selectors:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    if elements:
+                        print(f"QR code found with selector: {selector}")
+                        qr_found = True
+                        break
+            
+            if qr_found:
+                return True, "QR code is available for scanning in the browser window"
+            
+            if self.quick_login_check():
+                self.is_logged_in = True
+                self.save_cookies()
+                return True, "Successfully logged in"
+            
+            return False, "Could not detect QR code. Please refresh the page or check browser window."
+                
+        except Exception as e:
+            logger.error(f"Error in get_qr_code: {e}")
+            return False, f"Error getting QR code: {str(e)}"
+    
+    def close_session(self):
+        """Close browser session"""
+        with self.lock:
             try:
-                message_input = wait.until(EC.element_to_be_clickable((By.XPATH, selector)))
-                break
-            except:
-                continue
-        
-        if not message_input:
-            update_session_status(session_id, 'Message input not found. Chat may not exist or number invalid.', 70, 
-                                success=False, error='Could not find message input box')
-            return False, "Could not find message input box. Please check if the phone number has WhatsApp."
-        
-        # Send the message
-        update_session_status(session_id, 'Sending message...', 85)
-        
-        # Scroll to message input and click
-        driver.execute_script("arguments[0].scrollIntoView(true);", message_input)
-        time.sleep(1)
-        message_input.click()
-        time.sleep(2)  # Increased wait time for cloud
-        
-        # Clear any existing text completely
-        message_input.send_keys(Keys.CONTROL + "a")  # Select all
-        time.sleep(1)
-        message_input.send_keys(Keys.DELETE)  # Delete selected text
-        time.sleep(1)
-        
-        # Type the message
-        message_input.send_keys(message)
-        time.sleep(2)  # Increased wait time for cloud
-        
-        # Send the message by pressing Enter
-        message_input.send_keys(Keys.ENTER)
-        
-        # Wait to ensure message is sent - longer for cloud
-        wait_time = 5 if IS_CLOUD else 3
-        time.sleep(wait_time)
-        
-        update_session_status(session_id, 'Message sent successfully!', 100, 
-                            success=True, error=None)
-        sending_status['last_sent'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        return True, "Message sent successfully!"
-        
-    except Exception as e:
-        error_msg = f"Error occurred: {str(e)}"
-        update_session_status(session_id, f'Error: {str(e)}', 0, 
-                            success=False, error=error_msg)
-        return False, error_msg
-        
-    finally:
-        # Clean up
-        if driver:
-            driver.quit()
-        sending_status['is_sending'] = False
-        
-        # Clean up session after 5 minutes
-        def cleanup_session():
-            time.sleep(300)  # 5 minutes
-            if session_id in active_sessions:
-                del active_sessions[session_id]
-        
-        threading.Thread(target=cleanup_session, daemon=True).start()
+                if self.driver:
+                    self.driver.quit()
+                    self.driver = None
+                    self.wait = None
+                    self.is_logged_in = False
+                    self.last_phone_number = None
+                    print("Session closed successfully (cookies preserved)")
+                    return True, "Session closed successfully"
+                else:
+                    return True, "No active session to close"
+            except Exception as e:
+                logger.error(f"Error closing session: {e}")
+                return False, f"Error closing session: {str(e)}"
+    
+    def clear_session_data(self):
+        """Clear all session data including cookies and user data"""
+        with self.lock:
+            try:
+                if self.driver:
+                    self.driver.quit()
+                    self.driver = None
+                    self.wait = None
+                    self.is_logged_in = False
+                    self.last_phone_number = None
+                
+                if os.path.exists(self.cookies_file):
+                    os.remove(self.cookies_file)
+                
+                import shutil
+                if os.path.exists(self.user_data_dir):
+                    shutil.rmtree(self.user_data_dir, ignore_errors=True)
+                
+                print("All session data cleared")
+                return True, "All session data cleared successfully"
+            except Exception as e:
+                logger.error(f"Error clearing session data: {e}")
+                return False, f"Error clearing session data: {str(e)}"
 
-import shutil
+# Global bot instance
+bot = WhatsAppBot()
 
-def clear_whatsapp_session():
-    """Clear the saved WhatsApp session - useful for troubleshooting"""
+# REMOVED: Default phone number and message (they were causing the issue)
+# These should only be used for testing, not as fallbacks
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/setup_qr', methods=['POST'])
+def setup_qr():
     try:
-        session_dir = os.path.join(os.getcwd(), "whatsapp_session")
-        if os.path.exists(session_dir):
-            shutil.rmtree(session_dir)
-            print("✅ WhatsApp session cleared. You'll need to scan QR code again.")
-            return True, "Session cleared successfully"
-        else:
-            print("ℹ️ No session found to clear.")
-            return True, "No session found to clear"
-    except Exception as e:
-        print(f"❌ Error clearing session: {str(e)}")
-        return False, f"Error clearing session: {str(e)}"
-
-@app.route('/api/clear-session', methods=['POST'])
-def api_clear_session():
-    """API endpoint to clear WhatsApp session"""
-    try:
-        if sending_status['is_sending']:
-            return jsonify({
-                'success': False,
-                'error': 'Cannot clear session while sending message'
-            }), 429
-        
-        success, message = clear_whatsapp_session()
+        success, message = bot.get_qr_code()
         
         if success:
             return jsonify({
-                'success': True,
+                'status': 'success',
                 'message': message
-            }), 200
+            })
         else:
             return jsonify({
-                'success': False,
-                'error': message
+                'status': 'error',
+                'message': message
             }), 400
             
     except Exception as e:
         return jsonify({
-            'success': False,
-            'error': f'Server error: {str(e)}'
-        }), 500
-    
-@app.route('/api/authenticate', methods=['POST'])
-def api_authenticate():
-    """API endpoint to trigger WhatsApp authentication"""
-    try:
-        if sending_status['is_sending']:
-            return jsonify({
-                'success': False,
-                'error': 'Cannot authenticate while sending message'
-            }), 429
-        
-        # Check current authentication status
-        is_authenticated, auth_message = check_whatsapp_authentication()
-        
-        if is_authenticated:
-            return jsonify({
-                'success': True,
-                'message': 'Already authenticated',
-                'authenticated': True
-            }), 200
-        
-        # Trigger authentication
-        auth_success, auth_result = authenticate_whatsapp()
-        
-        if auth_success:
-            return jsonify({
-                'success': True,
-                'message': 'Authentication successful',
-                'authenticated': True
-            }), 200
-        else:
-            return jsonify({
-                'success': False,
-                'error': auth_result,
-                'authenticated': False
-            }), 400
-            
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': f'Server error: {str(e)}',
-            'authenticated': False
+            'status': 'error',
+            'message': f'Server error: {str(e)}'
         }), 500
 
-def check_whatsapp_authentication():
-    """Check if WhatsApp Web is authenticated using stored session"""
-    driver = None
+@app.route('/send_message', methods=['POST'])
+def send_message():
     try:
-        # For cloud deployment, always return True if session folder exists
-        if IS_CLOUD:
-            session_dir = os.path.join(os.getcwd(), "whatsapp_session")
-            if os.path.exists(session_dir):
-                print("✅ Cloud deployment - session folder exists")
-                return True, "Cloud deployment - assuming authenticated"
-            else:
-                print("❌ Cloud deployment - no session folder found")
-                return False, "No session found in cloud environment"
-        
-        # Use headless mode for quick authentication check
-        driver = setup_chrome_driver(headless=True)
-        
-        # Set longer timeout for cloud environments
-        timeout = 30 if IS_CLOUD else 20
-        
-        driver.set_page_load_timeout(timeout)
-        driver.get("https://web.whatsapp.com")
-        
-        # Wait for page to load - longer timeout for cloud
-        wait_time = 15 if IS_CLOUD else 8
-        time.sleep(wait_time)
-        
-        # Check multiple possible selectors for authentication
-        try:
-            # Wait for either QR code or main interface
-            WebDriverWait(driver, timeout).until(
-                lambda d: d.find_elements(By.XPATH, "//div[@data-testid='qr-code']") or 
-                         d.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-tab='3']") or
-                         d.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-lexical-editor='true']") or
-                         d.find_elements(By.XPATH, "//div[@title='Search or start new chat']")
-            )
-        except Exception as timeout_error:
-            print(f"Timeout waiting for page elements: {str(timeout_error)}")
-            return False, f"Page loading timeout: {str(timeout_error)}"
-        
-        # Check if QR code is present (means not authenticated)
-        qr_elements = driver.find_elements(By.XPATH, "//div[@data-testid='qr-code']")
-        if qr_elements:
-            return False, "Authentication required - QR code detected"
-        
-        # Check for main chat interface (multiple selectors)
-        search_elements = (
-            driver.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-tab='3']") or
-            driver.find_elements(By.XPATH, "//div[@contenteditable='true'][@data-lexical-editor='true']") or
-            driver.find_elements(By.XPATH, "//div[@title='Search or start new chat']") or
-            driver.find_elements(By.XPATH, "//div[contains(@class, 'copyable-text')][@contenteditable='true']")
-        )
-        
-        if search_elements:
-            return True, "Already authenticated - session active"
-        
-        return False, "Authentication status unclear"
-        
-    except Exception as e:
-        error_msg = f"Error checking authentication: {str(e)}"
-        print(error_msg)
-        return False, error_msg
-    finally:
-        if driver:
-            try:
-                driver.quit()
-            except:
-                pass
-
-def wait_for_whatsapp_load(driver, timeout=60):
-    """Wait for WhatsApp to fully load with better error handling"""
-    try:
-        print("Waiting for WhatsApp to load...")
-        
-        # Wait for the main WhatsApp interface to load
-        wait = WebDriverWait(driver, timeout)
-        
-        # Check if QR code is present (not authenticated)
-        qr_elements = driver.find_elements(By.XPATH, "//div[@data-testid='qr-code']")
-        if qr_elements:
-            print("QR code detected - not authenticated")
-            return False, "QR code detected - authentication required"
-        
-        # Wait for search box to appear
-        search_present = wait.until(
-            EC.any_of(
-                EC.presence_of_element_located((By.XPATH, "//div[@contenteditable='true'][@data-tab='3']")),
-                EC.presence_of_element_located((By.XPATH, "//div[@contenteditable='true'][@data-lexical-editor='true']")),
-                EC.presence_of_element_located((By.XPATH, "//div[@title='Search or start new chat']")),
-                EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'to2l77zo')][@contenteditable='true']")),
-                EC.presence_of_element_located((By.XPATH, "//div[@role='textbox'][@contenteditable='true']"))
-            )
-        )
-        
-        if search_present:
-            print("WhatsApp loaded successfully")
-            return True, "WhatsApp loaded successfully"
-        else:
-            print("WhatsApp did not load properly")
-            return False, "WhatsApp did not load properly"
-            
-    except Exception as e:
-        print(f"Error waiting for WhatsApp to load: {str(e)}")
-        return False, f"Error waiting for WhatsApp to load: {str(e)}"
-    
-@app.route('/api/auth-status', methods=['GET'])
-def api_auth_status():
-    """Check WhatsApp authentication status"""
-    try:
-        is_authenticated, auth_message = check_whatsapp_authentication()
-        
-        return jsonify({
-            'success': True,
-            'authenticated': is_authenticated,
-            'message': auth_message
-        }), 200
-        
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': f'Server error: {str(e)}',
-            'authenticated': False
-        }), 500
-
-# API Routes for Kotlin App
-@app.route('/api/send-message', methods=['POST'])
-def api_send_message():
-    """API endpoint to send WhatsApp message from Kotlin app"""
-    try:
-        # Get JSON data from request
+        # Get data from request
         data = request.get_json()
         
         if not data:
             return jsonify({
-                'success': False,
-                'error': 'No JSON data provided',
-                'session_id': None
+                'status': 'error',
+                'message': 'No data provided'
             }), 400
         
+        # FIXED: No fallback to hardcoded numbers
         phone_number = data.get('phone_number', '').strip()
-        message = data.get('message', '').strip()
+        message_text = data.get('message', '').strip()
         
         # Validate inputs
-        if not phone_number or not message:
+        if not phone_number:
             return jsonify({
-                'success': False,
-                'error': 'Phone number and message are required',
-                'session_id': None
+                'status': 'error',
+                'message': 'Phone number is required'
             }), 400
         
-        # Check if already sending
-        if sending_status['is_sending']:
+        if not message_text:
             return jsonify({
-                'success': False,
-                'error': 'Another message is currently being sent. Please wait.',
-                'session_id': None
-            }), 429
+                'status': 'error',
+                'message': 'Message text is required'
+            }), 400
         
-        # Create session ID
-        session_id = str(uuid.uuid4())
+        # Validate phone number format
+        if not phone_number.startswith('+'):
+            return jsonify({
+                'status': 'error',
+                'message': 'Phone number must include country code (e.g., +91xxxxxxxxxx)'
+            }), 400
         
-        # Store session data
-        active_sessions[session_id] = {
-            'phone_number': phone_number,
-            'message': message,
-            'status': 'Started',
-            'progress': 0,
-            'timestamp': datetime.now().isoformat(),
-            'success': None,
-            'error': None
-        }
+        # Validate phone number length
+        clean_number = phone_number.replace('+', '').replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+        if len(clean_number) < 8 or len(clean_number) > 15:
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid phone number length'
+            }), 400
         
-        # Start sending in background thread
-        thread = threading.Thread(
-            target=send_whatsapp_message_background,
-            args=(phone_number, message, session_id),
-            daemon=True
-        )
-        thread.start()
+        # Send message
+        success, message = bot.send_message(phone_number, message_text)
         
-        return jsonify({
-            'success': True,
-            'message': 'Message sending started',
-            'session_id': session_id,
-            'status': 'started'
-        }), 200
-        
+        if success:
+            return jsonify({
+                'status': 'success',
+                'message': message
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': message
+            }), 400
+            
     except Exception as e:
         return jsonify({
-            'success': False,
-            'error': f'Server error: {str(e)}',
-            'session_id': None
+            'status': 'error',
+            'message': f'Server error: {str(e)}'
         }), 500
 
-@app.route('/api/status/<session_id>', methods=['GET'])
-def api_get_status(session_id):
-    """API endpoint to get message sending status"""
+@app.route('/close_session', methods=['POST'])
+def close_session():
     try:
-        if session_id not in active_sessions:
-            return jsonify({
-                'success': False,
-                'error': 'Session not found',
-                'session_id': session_id
-            }), 404
-        
-        session_data = active_sessions[session_id]
+        success, message = bot.close_session()
         
         return jsonify({
-            'success': True,
-            'session_id': session_id,
-            'phone_number': session_data['phone_number'],
-            'message': session_data['message'],
-            'status': session_data['status'],
-            'progress': session_data['progress'],
-            'timestamp': session_data['timestamp'],
-            'is_complete': session_data['success'] is not None,
-            'is_success': session_data['success'],
-            'error': session_data['error']
-        }), 200
-        
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': f'Server error: {str(e)}',
-            'session_id': session_id
-        }), 500
-
-@app.route('/api/health', methods=['GET'])
-def api_health():
-    """Health check endpoint"""
-    return jsonify({
-        'success': True,
-        'status': 'healthy',
-        'timestamp': datetime.now().isoformat(),
-        'is_sending': sending_status['is_sending']
-    }), 200
-
-# Web Interface Routes (keeping existing functionality)
-@app.route('/')
-def index():
-    """Main page with the form"""
-    return render_template('index.html')
-
-@app.route('/send', methods=['POST'])
-def send_message():
-    """Handle message sending request from web interface"""
-    try:
-        # Get form data
-        phone_number = request.form.get('phone_number', '').strip()
-        message = request.form.get('message', '').strip()
-        
-        # Validate inputs
-        if not phone_number or not message:
-            return jsonify({
-                'success': False,
-                'error': 'Please enter both phone number and message'
-            })
-        
-        # Check if already sending
-        if sending_status['is_sending']:
-            return jsonify({
-                'success': False,
-                'error': 'Another message is currently being sent. Please wait.'
-            })
-        
-        # Create session ID
-        session_id = str(uuid.uuid4())
-        
-        # Store session data
-        active_sessions[session_id] = {
-            'phone_number': phone_number,
-            'message': message,
-            'status': 'Started',
-            'progress': 0,
-            'timestamp': datetime.now().isoformat(),
-            'success': None,
-            'error': None
-        }
-        
-        # Start sending in background thread
-        thread = threading.Thread(
-            target=send_whatsapp_message_background,
-            args=(phone_number, message, session_id),
-            daemon=True
-        )
-        thread.start()
-        
-        return jsonify({
-            'success': True,
-            'message': 'Message sending started. Please wait...',
-            'session_id': session_id
+            'status': 'success',
+            'message': message
         })
         
     except Exception as e:
         return jsonify({
-            'success': False,
-            'error': f'Server error: {str(e)}'
-        })
+            'status': 'error',
+            'message': f'Server error: {str(e)}'
+        }), 500
+        
+# Clean up on exit
+def cleanup():
+    bot.close_session()
 
-@app.route('/status')
-def get_status():
-    """Get current sending status for web interface"""
-    return jsonify(sending_status)
-
-@app.route('/setup')
-def setup_page():
-    """Setup page with instructions"""
-    return render_template('setup.html')
-
-# Error Handlers
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({
-        'success': False,
-        'error': 'Endpoint not found'
-    }), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    return jsonify({
-        'success': False,
-        'error': 'Internal server error'
-    }), 500
+atexit.register(cleanup)
 
 if __name__ == '__main__':
-    # Create templates directory if it doesn't exist
-    os.makedirs('templates', exist_ok=True)
+    print("Starting WhatsApp Bot Flask Service...")
+    print("Server will be available at: http://localhost:5000")
     
-    # Create the HTML template files (keeping existing templates)
-    with open('templates/index.html', 'w', encoding='utf-8') as f:
-        f.write('''<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WhatsApp Message Sender</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #25D366, #128C7E);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-        
-        .container {
-            background: white;
-            border-radius: 20px;
-            padding: 40px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            max-width: 500px;
-            width: 100%;
-        }
-        
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        
-        .header h1 {
-            color: #25D366;
-            font-size: 2.5em;
-            margin-bottom: 10px;
-        }
-        
-        .header p {
-            color: #666;
-            font-size: 1.1em;
-        }
-        
-        .api-info {
-            background: #f0f8ff;
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            border: 1px solid #25D366;
-        }
-        
-        .api-info h3 {
-            color: #25D366;
-            margin-bottom: 10px;
-        }
-        
-        .api-info code {
-            background: #e8e8e8;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-family: monospace;
-        }
-        
-        .form-group {
-            margin-bottom: 20px;
-        }
-        
-        label {
-            display: block;
-            margin-bottom: 8px;
-            color: #333;
-            font-weight: 600;
-        }
-        
-        input[type="text"], textarea {
-            width: 100%;
-            padding: 12px;
-            border: 2px solid #e0e0e0;
-            border-radius: 10px;
-            font-size: 16px;
-            transition: border-color 0.3s ease;
-        }
-        
-        input[type="text"]:focus, textarea:focus {
-            outline: none;
-            border-color: #25D366;
-        }
-        
-        textarea {
-            height: 100px;
-            resize: vertical;
-        }
-        
-        .send-btn {
-            width: 100%;
-            padding: 15px;
-            background: #25D366;
-            color: white;
-            border: none;
-            border-radius: 10px;
-            font-size: 18px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.3s ease;
-        }
-        
-        .send-btn:hover {
-            background: #128C7E;
-        }
-        
-        .send-btn:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
-        
-        .status {
-            margin-top: 20px;
-            padding: 15px;
-            border-radius: 10px;
-            text-align: center;
-            font-weight: 600;
-        }
-        
-        .status.success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        
-        .status.error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        
-        .status.info {
-            background: #cce7ff;
-            color: #004085;
-            border: 1px solid #b8daff;
-        }
-        
-        .progress-bar {
-            width: 100%;
-            height: 20px;
-            background: #e0e0e0;
-            border-radius: 10px;
-            overflow: hidden;
-            margin-top: 10px;
-        }
-        
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #25D366, #128C7E);
-            transition: width 0.3s ease;
-        }
-        
-        .loading {
-            display: none;
-            text-align: center;
-            margin-top: 20px;
-        }
-        
-        .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #25D366;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 10px;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
-        .setup-link {
-            text-align: center;
-            margin-top: 20px;
-        }
-        
-        .setup-link a {
-            color: #25D366;
-            text-decoration: none;
-            font-weight: 600;
-        }
-        
-        .setup-link a:hover {
-            text-decoration: underline;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>📱 WhatsApp Sender</h1>
-            <p>Send messages instantly via WhatsApp Web</p>
-        </div>
-        
-        <div class="api-info">
-            <h3>🔗 API Endpoints</h3>
-            <p><strong>Send Message:</strong> <code>POST /api/send-message</code></p>
-            <p><strong>Check Status:</strong> <code>GET /api/status/{session_id}</code></p>
-            <p><strong>Health Check:</strong> <code>GET /api/health</code></p>
-        </div>
-        
-        <form id="messageForm">
-            <div class="form-group">
-                <label for="phone_number">Phone Number (with country code):</label>
-                <input type="text" id="phone_number" name="phone_number" 
-                       placeholder="+911234567890" value="+911234567890" required>
-            </div>
-            
-            <div class="form-group">
-                <label for="message">Message:</label>
-                <textarea id="message" name="message" 
-                          placeholder="Enter your message here..." required>Hello from my bot!</textarea>
-            </div>
-            
-            <button type="submit" class="send-btn" id="sendBtn">Send Message</button>
-        </form>
-        
-        <div class="loading" id="loading">
-            <div class="spinner"></div>
-            <p>Sending message...</p>
-        </div>
-        
-        <div id="status" class="status" style="display: none;">
-            <div id="statusText"></div>
-            <div class="progress-bar">
-                <div class="progress-fill" id="progressFill" style="width: 0%"></div>
-            </div>
-        </div>
-        
-        <div class="setup-link">
-            <a href="/setup">Need help with setup?</a>
-        </div>
-    </div>
-
-    <script>
-        let currentSessionId = null;
-        
-        const form = document.getElementById('messageForm');
-        const sendBtn = document.getElementById('sendBtn');
-        const loading = document.getElementById('loading');
-        const statusDiv = document.getElementById('status');
-        const statusText = document.getElementById('statusText');
-        const progressFill = document.getElementById('progressFill');
-        
-        // Check status periodically
-        function checkStatus() {
-            fetch('/status')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.is_sending) {
-                        sendBtn.disabled = true;
-                        sendBtn.textContent = 'Sending...';
-                        loading.style.display = 'block';
-                        showStatus(data.status_message, 'info', data.progress || 0);
-                    } else {
-                        sendBtn.disabled = false;
-                        sendBtn.textContent = 'Send Message';
-                        loading.style.display = 'none';
-                        
-                        if (data.status_message.includes('successfully')) {
-                            showStatus(data.status_message, 'success', 100);
-                        } else if (data.status_message.includes('Error')) {
-                            showStatus(data.status_message, 'error', 0);
-                        } else if (data.status_message !== 'Ready to send message') {
-                            showStatus(data.status_message, 'info', data.progress || 0);
-                        }
-                    }
-                })
-                .catch(error => {
-                    console.error('Error checking status:', error);
-                });
-        }
-        
-        function showStatus(message, type, progress = 0) {
-            statusText.textContent = message;
-            statusDiv.className = `status ${type}`;
-            statusDiv.style.display = 'block';
-            progressFill.style.width = `${progress}%`;
-        }
-        
-        // Check status every 2 seconds
-        setInterval(checkStatus, 2000);
-        
-        // Handle form submission
-        form.addEventListener('submit', function(e) {
-            e.preventDefault();
-            
-            const formData = new FormData(form);
-            
-            fetch('/send', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    currentSessionId = data.session_id;
-                    showStatus(data.message, 'info', 0);
-                } else {
-                    showStatus(data.error, 'error', 0);
-                }
-            })
-            .catch(error => {
-                showStatus('Network error occurred', 'error', 0);
-            });
-        });
-        
-        // Initial status check
-        checkStatus();
-    </script>
-</body>
-</html>''')
-    
-    # Create setup template
-    with open('templates/setup.html', 'w', encoding='utf-8') as f:
-        f.write('''<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Setup - WhatsApp Message Sender</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #25D366, #128C7E);
-            min-height: 100vh;
-            padding: 20px;
-        }
-        
-        .container {
-            background: white;
-            border-radius: 20px;
-            padding: 40px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            max-width: 1000px;
-            margin: 0 auto;
-        }
-        
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        
-        .header h1 {
-            color: #25D366;
-            font-size: 2.5em;
-            margin-bottom: 10px;
-        }
-        
-        .setup-content {
-            line-height: 1.6;
-            color: #333;
-        }
-        
-        .step {
-            margin-bottom: 30px;
-            padding: 20px;
-            background: #f9f9f9;
-            border-radius: 10px;
-            border-left: 4px solid #25D366;
-        }
-        
-        .step h3 {
-            color: #25D366;
-            margin-bottom: 10px;
-        }
-        
-        .api-section {
-            background: #f0f8ff;
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            border: 1px solid #25D366;
-        }
-        
-        .api-section h3 {
-            color: #25D366;
-            margin-bottom: 15px;
-        }
-        
-        .code {
-            background: #f4f4f4;
-            padding: 15px;
-            border-radius: 5px;
-            font-family: 'Courier New', monospace;
-            margin: 10px 0;
-            overflow-x: auto;
-        }
-        
-        .json-example {
-            background: #2d2d2d;
-            color: #f8f8f2;
-            padding: 15px;
-            border-radius: 5px;
-            margin: 10px 0;
-            overflow-x: auto;
-        }
-        
-        .back-link {
-            text-align: center;
-            margin-top: 30px;
-        }
-        
-        .back-link a {
-            color: #25D366;
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 18px;
-        }
-        
-        .back-link a:hover {
-            text-decoration: underline;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>🔧 Setup Instructions</h1>
-            <p>Complete setup guide for WhatsApp API Server</p>
-        </div>
-        
-        <div class="setup-content">
-            <div class="step">
-                <h3>Step 1: Install Required Dependencies</h3>
-                <p>Install the required Python packages:</p>
-                <div class="code">pip install flask flask-cors selenium</div>
-            </div>
-            
-            <div class="step">
-                <h3>Step 2: Install ChromeDriver</h3>
-                <p>Download ChromeDriver from <a href="https://chromedriver.chromium.org/" target="_blank">https://chromedriver.chromium.org/</a> and add it to your PATH, or install via:</p>
-                <div class="code">pip install chromedriver-autoinstaller</div>
-            </div>
-            
-            <div class="step">
-                <h3>Step 3: First Time Setup</h3>
-                <p>On your first run, you'll need to:</p>
-                <ul>
-                    <li>Run the Flask app</li>
-                    <li>Try to send a message (it will open Chrome)</li>
-                    <li>Scan the QR code in WhatsApp Web</li>
-                    <li>After that, all subsequent runs will be in headless mode</li>
-                </ul>
-            </div>
-            
-            <div class="api-section">
-                <h3>📡 API Endpoints for Kotlin App</h3>
-                
-                <h4>1. Send Message</h4>
-                <div class="code">POST http://your-server-ip:5000/api/send-message</div>
-                <p><strong>Request Body (JSON):</strong></p>
-                <div class="json-example">{
-    "phone_number": "+911234567890",
-    "message": "Hello from my Kotlin app!"
-}</div>
-                <p><strong>Response:</strong></p>
-                <div class="json-example">{
-    "success": true,
-    "message": "Message sending started",
-    "session_id": "uuid-here",
-    "status": "started"
-}</div>
-                
-                <h4>2. Check Status</h4>
-                <div class="code">GET http://your-server-ip:5000/api/status/{session_id}</div>
-                <p><strong>Response:</strong></p>
-                <div class="json-example">{
-    "success": true,
-    "session_id": "uuid-here",
-    "phone_number": "+911234567890",
-    "message": "Hello from my Kotlin app!",
-    "status": "Message sent successfully!",
-    "progress": 100,
-    "timestamp": "2024-01-01T12:00:00",
-    "is_complete": true,
-    "is_success": true,
-    "error": null
-}</div>
-                
-                <h4>3. Health Check</h4>
-                <div class="code">GET http://your-server-ip:5000/api/health</div>
-                <p><strong>Response:</strong></p>
-                <div class="json-example">{
-    "success": true,
-    "status": "healthy",
-    "timestamp": "2024-01-01T12:00:00",
-    "is_sending": false
-}</div>
-            </div>
-            
-            <div class="step">
-                <h3>Step 4: Run the Application</h3>
-                <p>Save the code as <code>app.py</code> and run:</p>
-                <div class="code">python app.py</div>
-                <p>The server will start on <code>http://0.0.0.0:5000</code></p>
-            </div>
-            
-            <div class="step">
-                <h3>Step 5: Kotlin App Integration</h3>
-                <p>In your Kotlin app, you can use libraries like Retrofit or OkHttp to make API calls:</p>
-                <div class="code">
-// Example using Retrofit
-val retrofit = Retrofit.Builder()
-    .baseUrl("http://your-server-ip:5000/")
-    .addConverterFactory(GsonConverterFactory.create())
-    .build()
-
-val apiService = retrofit.create(WhatsAppApiService::class.java)
-
-// Send message
-val request = SendMessageRequest("+911234567890", message)
-                </div>
-            </div>
-            
-            <div class="step">
-                <h3>🔧 Troubleshooting</h3>
-                <ul>
-                    <li><strong>Chrome not found:</strong> Make sure Chrome is installed and ChromeDriver is in PATH</li>
-                    <li><strong>WhatsApp not loading:</strong> Check your internet connection and try again</li>
-                    <li><strong>QR Code issues:</strong> Delete the whatsapp_profile folder and scan QR code again</li>
-                    <li><strong>Message not sending:</strong> Check if the phone number is valid and has WhatsApp</li>
-                </ul>
-            </div>
-            
-            <div class="step">
-                <h3>📱 Kotlin App Example</h3>
-                <p>Here's a complete example for your Kotlin app:</p>
-                <div class="code">
-// Data classes
-data class SendMessageRequest(
-    val phone_number: String,
-    val message: String
-)
-
-data class SendMessageResponse(
-    val success: Boolean,
-    val message: String,
-    val session_id: String?,
-    val status: String?
-)
-
-data class StatusResponse(
-    val success: Boolean,
-    val session_id: String?,
-    val phone_number: String?,
-    val message: String?,
-    val status: String?,
-    val progress: Int?,
-    val timestamp: String?,
-    val is_complete: Boolean?,
-    val is_success: Boolean?,
-    val error: String?
-)
-
-// API Interface
-interface WhatsAppApiService {
-    @POST("api/send-message")
-    suspend fun sendMessage(@Body request: SendMessageRequest): Response<SendMessageResponse>
-    
-    @GET("api/status/{sessionId}")
-    suspend fun getStatus(@Path("sessionId") sessionId: String): Response<StatusResponse>
-    
-    @GET("api/health")
-    suspend fun healthCheck(): Response<Map<String, Any>>
-}
-
-// Usage in Activity/Fragment
-class MainActivity : AppCompatActivity() {
-    private lateinit var apiService: WhatsAppApiService
-    
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-        
-        // Initialize Retrofit
-        val retrofit = Retrofit.Builder()
-            .baseUrl("http://YOUR_SERVER_IP:5000/")
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-            
-        apiService = retrofit.create(WhatsAppApiService::class.java)
-        
-        // Example: Send message
-        sendWhatsAppMessage("+911234567890", "Hello from Kotlin!")
-    }
-    
-    private fun sendWhatsAppMessage(phoneNumber: String, message: String) {
-        lifecycleScope.launch {
-            try {
-                val request = SendMessageRequest(phoneNumber, message)
-                val response = apiService.sendMessage(request)
-                
-                if (response.isSuccessful) {
-                    val result = response.body()
-                    if (result?.success == true) {
-                        Toast.makeText(this@MainActivity, "Message sending started", Toast.LENGTH_SHORT).show()
-                        result.session_id?.let { sessionId ->
-                            trackMessageStatus(sessionId)
-                        }
-                    } else {
-                        Toast.makeText(this@MainActivity, "Failed: ${result?.message}", Toast.LENGTH_LONG).show()
-                    }
-                } else {
-                    Toast.makeText(this@MainActivity, "HTTP Error: ${response.code()}", Toast.LENGTH_LONG).show()
-                }
-            } catch (e: Exception) {
-                Toast.makeText(this@MainActivity, "Network Error: ${e.message}", Toast.LENGTH_LONG).show()
-            }
-        }
-    }
-    
-    private fun trackMessageStatus(sessionId: String) {
-        lifecycleScope.launch {
-            var isComplete = false
-            while (!isComplete) {
-                try {
-                    val response = apiService.getStatus(sessionId)
-                    if (response.isSuccessful) {
-                        val status = response.body()
-                        if (status?.success == true) {
-                            // Update UI with progress
-                            runOnUiThread {
-                                updateProgressUI(status.status, status.progress ?: 0)
-                            }
-                            
-                            if (status.is_complete == true) {
-                                isComplete = true
-                                runOnUiThread {
-                                    if (status.is_success == true) {
-                                        Toast.makeText(this@MainActivity, "Message sent successfully!", Toast.LENGTH_LONG).show()
-                                    } else {
-                                        Toast.makeText(this@MainActivity, "Failed: ${status.error}", Toast.LENGTH_LONG).show()
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    delay(2000) // Check every 2 seconds
-                } catch (e: Exception) {
-                    break
-                }
-            }
-        }
-    }
-    
-    private fun updateProgressUI(status: String?, progress: Int) {
-        // Update your progress bar and status text here
-        // Example:
-        // progressBar.progress = progress
-        // statusTextView.text = status
-    }
-}
-
-// Add to build.gradle (app level)
-dependencies {
-    implementation 'com.squareup.retrofit2:retrofit:2.9.0'
-    implementation 'com.squareup.retrofit2:converter-gson:2.9.0'
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4'
-    implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.6.2'
-}
-
-// Add to AndroidManifest.xml
-<uses-permission android:name="android.permission.INTERNET" />
-<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-                </div>
-            </div>
-            
-            <div class="step">
-                <h3>🌐 Network Configuration</h3>
-                <p>Make sure your server is accessible from your Android device:</p>
-                <ul>
-                    <li>If testing locally, use your computer's IP address (not localhost)</li>
-                    <li>Make sure port 5000 is not blocked by firewall</li>
-                    <li>For production, deploy to a cloud server (AWS, Google Cloud, etc.)</li>
-                </ul>
-                <div class="code">
-# Find your IP address
-# Windows: ipconfig
-# Mac/Linux: ifconfig or ip addr show
-# Then use: http://192.168.1.100:5000/ (replace with your IP)
-                </div>
-            </div>
-        </div>
-        
-        <div class="back-link">
-            <a href="/">← Back to Message Sender</a>
-        </div>
-    </div>
-</body>
-</html>''')
-    
-    print("WhatsApp API Server is ready!")
-    print("========================================")
-    print("🌐 Web Interface: http://0.0.0.0:5000")
-    print("📱 API Endpoints:")
-    print("   • POST /api/send-message")
-    print("   • GET /api/status/{session_id}")
-    print("   • GET /api/health")
-    print("========================================")
-    print("🔧 Setup: Visit http://0.0.0.0:5000/setup for complete instructions")
-    print("📋 First time? You'll need to scan QR code in WhatsApp Web")
-    print("========================================")
-    
-    # Run the Flask app
-    app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
+    # For cloud hosting, use environment variables
+    port = int(os.environ.get('PORT', 5000))
+    app.run(debug=False, host='0.0.0.0', port=port, threaded=True)
