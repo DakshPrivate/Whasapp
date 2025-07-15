@@ -8,6 +8,8 @@ from urllib.parse import quote
 import logging
 import sys
 from pathlib import Path
+import base64
+from io import BytesIO
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -84,7 +86,6 @@ class WhatsAppBot:
             logger.info("Running in local mode (with display)")
         
         # Performance optimizations
-        options.add_argument('--disable-images')
         options.add_argument('--disable-plugins')
         options.add_argument('--disable-extensions')
         options.add_argument('--disable-default-apps')
@@ -284,6 +285,61 @@ class WhatsAppBot:
             logger.error(f"Error in ensure_logged_in: {e}")
             return False, f"Login error: {str(e)}"
     
+    def capture_qr_code(self):
+        """Capture QR code as base64 image"""
+        try:
+            from selenium.webdriver.common.by import By
+            from PIL import Image
+            
+            qr_selectors = [
+                "[data-testid='qr-code']",
+                "canvas[role='img']",
+                "canvas"
+            ]
+            
+            qr_element = None
+            for selector in qr_selectors:
+                try:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    if elements and elements[0].is_displayed():
+                        qr_element = elements[0]
+                        break
+                except:
+                    continue
+            
+            if qr_element:
+                # Get the QR code element location and size
+                location = qr_element.location
+                size = qr_element.size
+                
+                # Take a screenshot of the entire page
+                screenshot = self.driver.get_screenshot_as_png()
+                
+                # Open the screenshot with PIL
+                image = Image.open(BytesIO(screenshot))
+                
+                # Calculate the crop area
+                left = location['x']
+                top = location['y']
+                right = location['x'] + size['width']
+                bottom = location['y'] + size['height']
+                
+                # Crop the QR code area
+                qr_image = image.crop((left, top, right, bottom))
+                
+                # Convert to base64
+                buffered = BytesIO()
+                qr_image.save(buffered, format="PNG")
+                qr_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+                
+                return True, qr_base64
+            
+            return False, "QR code element not found"
+            
+        except Exception as e:
+            logger.error(f"Error capturing QR code: {e}")
+            return False, f"Error capturing QR code: {str(e)}"
+    
     def send_message(self, phone_number, message):
         """Send WhatsApp message with real functionality"""
         with self.lock:
@@ -446,17 +502,17 @@ class WhatsAppBot:
             return False
     
     def get_qr_code(self):
-        """Get QR code for login"""
+        """Get QR code for login with image capture"""
         try:
             from selenium.webdriver.common.by import By
             
             if not self.is_driver_alive():
                 if not self.restart_driver():
-                    return False, "Failed to restart browser driver"
+                    return False, "Failed to restart browser driver", None
             
             if not self.driver:
                 if not self.setup_driver():
-                    return False, "Failed to setup driver"
+                    return False, "Failed to setup driver", None
             
             logger.info("Loading WhatsApp Web...")
             
@@ -465,12 +521,12 @@ class WhatsAppBot:
                 time.sleep(5)
             except Exception as nav_error:
                 logger.error(f"Navigation error: {nav_error}")
-                return False, f"Failed to navigate to WhatsApp Web: {str(nav_error)}"
+                return False, f"Failed to navigate to WhatsApp Web: {str(nav_error)}", None
             
             if self.quick_login_check():
                 self.is_logged_in = True
                 self.save_cookies()
-                return True, "Already logged in - no QR code needed"
+                return True, "Already logged in - no QR code needed", None
             
             # Check for QR code
             qr_found = False
@@ -489,7 +545,7 @@ class WhatsAppBot:
                 for selector in qr_selectors:
                     try:
                         elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                        if elements:
+                        if elements and elements[0].is_displayed():
                             logger.info(f"QR code found with selector: {selector}")
                             qr_found = True
                             break
@@ -501,13 +557,34 @@ class WhatsAppBot:
                     elapsed += wait_interval
             
             if qr_found:
-                return True, "QR code is ready for scanning. Please scan it with your phone."
+                # Capture QR code image
+                success, qr_image_data = self.capture_qr_code()
+                if success:
+                    return True, "QR code captured successfully", qr_image_data
+                else:
+                    return True, "QR code is ready for scanning. Please scan it with your phone.", None
             
-            return False, "Could not find QR code. Please try again."
+            return False, "Could not find QR code. Please try again.", None
                 
         except Exception as e:
             logger.error(f"Error in get_qr_code: {e}")
-            return False, f"Error getting QR code: {str(e)}"
+            return False, f"Error getting QR code: {str(e)}", None
+    
+    def check_login_status(self):
+        """Check current login status"""
+        try:
+            if not self.is_driver_alive():
+                return False, "Driver not active"
+            
+            if self.quick_login_check():
+                self.is_logged_in = True
+                return True, "Logged in successfully"
+            else:
+                return False, "Not logged in"
+                
+        except Exception as e:
+            logger.error(f"Error checking login status: {e}")
+            return False, f"Error: {str(e)}"
     
     def close_session(self):
         """Close browser session"""
@@ -532,221 +609,24 @@ bot = WhatsAppBot()
 
 @app.route('/')
 def index():
-    # Inline HTML template
-    return '''
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>WhatsApp Bot</title>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <style>
-            body { 
-                font-family: Arial, sans-serif; 
-                max-width: 800px; 
-                margin: 0 auto; 
-                padding: 20px; 
-                background-color: #f0f0f0;
-            }
-            .container { 
-                background: white; 
-                padding: 30px; 
-                border-radius: 10px; 
-                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            }
-            h1 { color: #25D366; text-align: center; margin-bottom: 30px; }
-            h2 { color: #075E54; border-bottom: 2px solid #25D366; padding-bottom: 10px; }
-            input, textarea, button { 
-                width: 100%; 
-                padding: 12px; 
-                margin: 10px 0; 
-                border: 1px solid #ddd;
-                border-radius: 5px;
-                font-size: 16px;
-            }
-            button { 
-                background: #25D366; 
-                color: white; 
-                border: none; 
-                cursor: pointer;
-                font-weight: bold;
-            }
-            button:hover { background: #128C7E; }
-            button:disabled { background: #ccc; cursor: not-allowed; }
-            .result { 
-                margin: 20px 0; 
-                padding: 15px; 
-                border-radius: 5px; 
-                font-weight: bold;
-            }
-            .success { 
-                background: #d4edda; 
-                color: #155724; 
-                border: 1px solid #c3e6cb; 
-            }
-            .error { 
-                background: #f8d7da; 
-                color: #721c24; 
-                border: 1px solid #f5c6cb; 
-            }
-            .loading { 
-                background: #fff3cd; 
-                color: #856404; 
-                border: 1px solid #ffeaa7; 
-            }
-            .step { 
-                background: #f8f9fa; 
-                padding: 15px; 
-                margin: 15px 0; 
-                border-left: 4px solid #25D366; 
-            }
-            .warning {
-                background: #fff3cd;
-                color: #856404;
-                border: 1px solid #ffeaa7;
-                padding: 15px;
-                border-radius: 5px;
-                margin: 20px 0;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>🚀 WhatsApp Bot</h1>
-            
-            <div class="warning">
-                <strong>⚠️ Important:</strong> This bot requires Chrome browser and selenium. 
-                Make sure you have installed: <code>pip install selenium</code>
-            </div>
-            
-            <div class="step">
-                <h2>Step 1: Setup Login</h2>
-                <p>Click the button below to open WhatsApp Web and scan the QR code with your phone.</p>
-                <button onclick="setupQR()" id="qr-btn">🔗 Setup QR Code Login</button>
-                <div id="qr-result"></div>
-            </div>
-            
-            <div class="step">
-                <h2>Step 2: Send Message</h2>
-                <p>After successful login, you can send messages to any WhatsApp number.</p>
-                <input type="text" id="phone" placeholder="📱 Phone number with country code (e.g., +1234567890)">
-                <textarea id="message" placeholder="💬 Enter your message here..." rows="4"></textarea>
-                <button onclick="sendMessage()" id="send-btn">📤 Send Message</button>
-                <div id="message-result"></div>
-            </div>
-            
-            <div class="step">
-                <h2>Step 3: Close Session</h2>
-                <p>When you're done, close the browser session to free up resources.</p>
-                <button onclick="closeSession()" id="close-btn">🔒 Close Session</button>
-                <div id="close-result"></div>
-            </div>
-        </div>
-        
-        <script>
-            function showLoading(elementId, message) {
-                document.getElementById(elementId).innerHTML = 
-                    '<div class="result loading">' + message + '</div>';
-            }
-            
-            function showResult(elementId, success, message) {
-                const className = success ? 'success' : 'error';
-                document.getElementById(elementId).innerHTML = 
-                    '<div class="result ' + className + '">' + message + '</div>';
-            }
-            
-            function setupQR() {
-                const btn = document.getElementById('qr-btn');
-                btn.disabled = true;
-                btn.textContent = 'Setting up...';
-                
-                showLoading('qr-result', '🔄 Setting up WhatsApp Web...');
-                
-                fetch('/setup_qr', { method: 'POST' })
-                    .then(response => response.json())
-                    .then(data => {
-                        showResult('qr-result', data.status === 'success', data.message);
-                        btn.disabled = false;
-                        btn.textContent = '🔗 Setup QR Code Login';
-                    })
-                    .catch(error => {
-                        showResult('qr-result', false, '❌ Error: ' + error);
-                        btn.disabled = false;
-                        btn.textContent = '🔗 Setup QR Code Login';
-                    });
-            }
-            
-            function sendMessage() {
-                const phone = document.getElementById('phone').value;
-                const message = document.getElementById('message').value;
-                const btn = document.getElementById('send-btn');
-                
-                if (!phone || !message) {
-                    showResult('message-result', false, '❌ Please fill in both phone number and message');
-                    return;
-                }
-                
-                btn.disabled = true;
-                btn.textContent = 'Sending...';
-                
-                showLoading('message-result', '📤 Sending message...');
-                
-                fetch('/send_message', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ phone_number: phone, message: message })
-                })
-                    .then(response => response.json())
-                    .then(data => {
-                        showResult('message-result', data.status === 'success', data.message);
-                        if (data.status === 'success') {
-                            document.getElementById('message').value = '';
-                        }
-                        btn.disabled = false;
-                        btn.textContent = '📤 Send Message';
-                    })
-                    .catch(error => {
-                        showResult('message-result', false, '❌ Error: ' + error);
-                        btn.disabled = false;
-                        btn.textContent = '📤 Send Message';
-                    });
-            }
-            
-            function closeSession() {
-                const btn = document.getElementById('close-btn');
-                btn.disabled = true;
-                btn.textContent = 'Closing...';
-                
-                showLoading('close-result', '🔄 Closing session...');
-                
-                fetch('/close_session', { method: 'POST' })
-                    .then(response => response.json())
-                    .then(data => {
-                        showResult('close-result', data.status === 'success', data.message);
-                        btn.disabled = false;
-                        btn.textContent = '🔒 Close Session';
-                    })
-                    .catch(error => {
-                        showResult('close-result', false, '❌ Error: ' + error);
-                        btn.disabled = false;
-                        btn.textContent = '🔒 Close Session';
-                    });
-            }
-        </script>
-    </body>
-    </html>
-    '''
+    return render_template('index.html')
 
 @app.route('/setup_qr', methods=['POST'])
 def setup_qr():
     try:
-        success, message = bot.get_qr_code()
+        success, message, qr_image = bot.get_qr_code()
         
         if success:
-            return jsonify({
+            response_data = {
                 'status': 'success',
                 'message': message
-            })
+            }
+            
+            # Include QR code image if available
+            if qr_image:
+                response_data['qr_image'] = qr_image
+            
+            return jsonify(response_data)
         else:
             return jsonify({
                 'status': 'error',
@@ -758,6 +638,25 @@ def setup_qr():
         return jsonify({
             'status': 'error',
             'message': f'Server error: {str(e)}'
+        }), 500
+
+@app.route('/check_login', methods=['GET'])
+def check_login():
+    try:
+        success, message = bot.check_login_status()
+        
+        return jsonify({
+            'status': 'success' if success else 'error',
+            'message': message,
+            'logged_in': success
+        })
+        
+    except Exception as e:
+        logger.error(f"Check login route error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': f'Server error: {str(e)}',
+            'logged_in': False
         }), 500
 
 @app.route('/send_message', methods=['POST'])
@@ -842,7 +741,7 @@ atexit.register(cleanup)
 
 if __name__ == '__main__':
     print("Starting WhatsApp Bot Flask Service...")
-    print("Make sure you have installed: pip install selenium")
+    print("Make sure you have installed: pip install selenium pillow")
     print("And Chrome browser is installed on your system")
     print("Server will be available at: http://localhost:5000")
     
