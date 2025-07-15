@@ -1,323 +1,337 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WhatsApp Message Sender</title>
+    <title>WhatsApp Bot</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        body { 
+            font-family: Arial, sans-serif; 
+            max-width: 900px; 
+            margin: 0 auto; 
+            padding: 20px; 
+            background-color: #f5f5f5;
         }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #25D366, #128C7E);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-        
         .container {
             background: white;
-            border-radius: 20px;
-            padding: 40px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            max-width: 500px;
-            width: 100%;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         }
-        
-        .header {
+        h1 {
+            color: #25d366;
             text-align: center;
             margin-bottom: 30px;
         }
-        
-        .header h1 {
-            color: #25D366;
-            font-size: 2.5em;
-            margin-bottom: 10px;
-        }
-        
-        .header p {
-            color: #666;
-            font-size: 1.1em;
-        }
-        
-        .api-info {
-            background: #f0f8ff;
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            border: 1px solid #25D366;
-        }
-        
-        .api-info h3 {
-            color: #25D366;
-            margin-bottom: 10px;
-        }
-        
-        .api-info code {
-            background: #e8e8e8;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-family: monospace;
-        }
-        
         .form-group {
             margin-bottom: 20px;
         }
-        
         label {
             display: block;
             margin-bottom: 8px;
+            font-weight: bold;
             color: #333;
-            font-weight: 600;
         }
-        
-        input[type="text"], textarea {
+        input[type="text"], input[type="tel"], textarea {
             width: 100%;
             padding: 12px;
-            border: 2px solid #e0e0e0;
-            border-radius: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
             font-size: 16px;
-            transition: border-color 0.3s ease;
+            box-sizing: border-box;
+            transition: border-color 0.3s;
         }
-        
-        input[type="text"]:focus, textarea:focus {
+        input[type="text"]:focus, input[type="tel"]:focus, textarea:focus {
             outline: none;
-            border-color: #25D366;
+            border-color: #25d366;
         }
-        
         textarea {
-            height: 100px;
             resize: vertical;
+            min-height: 80px;
         }
-        
-        .send-btn {
-            width: 100%;
-            padding: 15px;
-            background: #25D366;
-            color: white;
+        .input-hint {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+        button { 
+            padding: 12px 24px; 
+            margin: 10px 5px; 
+            font-size: 16px; 
+            cursor: pointer; 
             border: none;
-            border-radius: 10px;
-            font-size: 18px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.3s ease;
+            border-radius: 5px;
+            transition: background-color 0.3s;
         }
-        
-        .send-btn:hover {
-            background: #128C7E;
+        .btn-primary {
+            background-color: #25d366;
+            color: white;
         }
-        
-        .send-btn:disabled {
-            background: #ccc;
-            cursor: not-allowed;
+        .btn-primary:hover {
+            background-color: #1da851;
         }
-        
-        .status {
-            margin-top: 20px;
-            padding: 15px;
-            border-radius: 10px;
+        .btn-secondary {
+            background-color: #6c757d;
+            color: white;
+        }
+        .btn-secondary:hover {
+            background-color: #545b62;
+        }
+        .btn-danger {
+            background-color: #dc3545;
+            color: white;
+        }
+        .btn-danger:hover {
+            background-color: #c82333;
+        }
+        .success { color: #28a745; }
+        .error { color: #dc3545; }
+        .info { color: #17a2b8; }
+        #status { 
+            margin: 20px 0; 
+            padding: 15px; 
+            border-radius: 5px; 
+            font-weight: bold;
             text-align: center;
-            font-weight: 600;
         }
-        
-        .status.success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
+        #browser-window { 
+            margin: 20px 0; 
+            padding: 20px; 
+            background: #f8f9fa; 
+            border-radius: 5px; 
+            border-left: 4px solid #25d366;
         }
-        
-        .status.error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        
-        .status.info {
-            background: #cce7ff;
-            color: #004085;
-            border: 1px solid #b8daff;
-        }
-        
-        .progress-bar {
-            width: 100%;
-            height: 20px;
-            background: #e0e0e0;
-            border-radius: 10px;
-            overflow: hidden;
-            margin-top: 10px;
-        }
-        
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #25D366, #128C7E);
-            transition: width 0.3s ease;
-        }
-        
-        .loading {
-            display: none;
+        .controls {
             text-align: center;
-            margin-top: 20px;
+            margin: 30px 0;
         }
-        
-        .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #25D366;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 10px;
+        .message-form {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
         }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+        .form-row {
+            display: flex;
+            gap: 15px;
         }
-        
-        .setup-link {
-            text-align: center;
-            margin-top: 20px;
+        .form-row .form-group {
+            flex: 1;
         }
-        
-        .setup-link a {
-            color: #25D366;
-            text-decoration: none;
-            font-weight: 600;
-        }
-        
-        .setup-link a:hover {
-            text-decoration: underline;
+        @media (max-width: 600px) {
+            .form-row {
+                flex-direction: column;
+            }
+            .controls {
+                text-align: left;
+            }
+            button {
+                width: 100%;
+                margin: 5px 0;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <h1>📱 WhatsApp Sender</h1>
-            <p>Send messages instantly via WhatsApp Web</p>
-        </div>
+        <h1>📱 WhatsApp Bot Control Panel</h1>
         
-        <div class="api-info">
-            <h3>🔗 API Endpoints</h3>
-            <p><strong>Send Message:</strong> <code>POST /api/send-message</code></p>
-            <p><strong>Check Status:</strong> <code>GET /api/status/{session_id}</code></p>
-            <p><strong>Health Check:</strong> <code>GET /api/health</code></p>
-        </div>
+        <div id="status">Status: Ready</div>
         
-        <form id="messageForm">
-            <div class="form-group">
-                <label for="phone_number">Phone Number (with country code):</label>
-                <input type="text" id="phone_number" name="phone_number" 
-                       placeholder="+911234567890" value="+911234567890" required>
+        <div class="message-form">
+            <h3>📝 Message Configuration</h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="phoneNumber">📞 Phone Number:</label>
+                    <input type="tel" id="phoneNumber" placeholder="+1234567890" value="+917574004603">
+                    <div class="input-hint">Include country code (e.g., +91 for India, +1 for US)</div>
+                </div>
+                <div class="form-group">
+                    <label for="messageText">💬 Message:</label>
+                    <textarea id="messageText" placeholder="Type your message here...">Hello from my bot!</textarea>
+                    <div class="input-hint">Enter the message you want to send</div>
+                </div>
             </div>
+        </div>
+        
+        <div class="controls">
+            <button onclick="setupQR()" class="btn-primary">🔐 Setup/Login to WhatsApp</button>
+            <button onclick="sendMessage()" class="btn-primary">📤 Send Message</button>
+            <button onclick="closeSession()" class="btn-secondary">🔒 Close Session</button>
+            <button onclick="clearAllData()" class="btn-danger">🗑️ Clear All Data</button>
+        </div>
+        
+        <div id="browser-window">
+            <h3>📋 Instructions:</h3>
+            <ol>
+                <li><strong>Enter phone number and message</strong> in the form above</li>
+                <li><strong>Click "Setup/Login to WhatsApp"</strong> - This will open WhatsApp Web</li>
+                <li><strong>If you see "Already logged in"</strong> - You can directly send messages!</li>
+                <li><strong>If QR code appears</strong> - Scan it with your WhatsApp mobile app</li>
+                <li><strong>Once logged in, click "Send Message"</strong> - The message will be sent</li>
+                <li><strong>Session persists</strong> - No need to scan QR code again even after closing</li>
+            </ol>
             
-            <div class="form-group">
-                <label for="message">Message:</label>
-                <textarea id="message" name="message" 
-                          placeholder="Enter your message here..." required>Hello from my bot!</textarea>
-            </div>
+            <p><strong>⚡ New Features:</strong></p>
+            <ul>
+                <li><strong>Dynamic Input:</strong> Enter any phone number and message</li>
+                <li><strong>Session Persistence:</strong> Your login will be remembered between sessions</li>
+                <li><strong>Better Error Handling:</strong> More informative error messages</li>
+                <li><strong>Faster Message Sending:</strong> Optimized for speed</li>
+                <li><strong>Clear All Data:</strong> Use this button if you want to start fresh</li>
+            </ul>
             
-            <button type="submit" class="send-btn" id="sendBtn">Send Message</button>
-        </form>
-        
-        <div class="loading" id="loading">
-            <div class="spinner"></div>
-            <p>Sending message...</p>
-        </div>
-        
-        <div id="status" class="status" style="display: none;">
-            <div id="statusText"></div>
-            <div class="progress-bar">
-                <div class="progress-fill" id="progressFill" style="width: 0%"></div>
-            </div>
-        </div>
-        
-        <div class="setup-link">
-            <a href="/setup">Need help with setup?</a>
+            <p><strong>🔧 Troubleshooting:</strong></p>
+            <ul>
+                <li>If you need to login fresh, click "Clear All Data" first</li>
+                <li>Make sure Chrome browser is installed</li>
+                <li>Don't close the browser window manually</li>
+                <li>If stuck, use "Clear All Data" and try again</li>
+                <li>Phone number must include country code (e.g., +91 for India)</li>
+            </ul>
         </div>
     </div>
-
+    
     <script>
-        let currentSessionId = null;
+        function updateStatus(message, type = 'info') {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = type;
+        }
         
-        const form = document.getElementById('messageForm');
-        const sendBtn = document.getElementById('sendBtn');
-        const loading = document.getElementById('loading');
-        const statusDiv = document.getElementById('status');
-        const statusText = document.getElementById('statusText');
-        const progressFill = document.getElementById('progressFill');
+        function validateInputs() {
+            const phoneNumber = document.getElementById('phoneNumber').value.trim();
+            const messageText = document.getElementById('messageText').value.trim();
+            
+            if (!phoneNumber) {
+                updateStatus('❌ Please enter a phone number', 'error');
+                return false;
+            }
+            
+            if (!messageText) {
+                updateStatus('❌ Please enter a message', 'error');
+                return false;
+            }
+            
+            // Basic phone number validation
+            if (!/^\+[\d\s\-\(\)]{8,}$/.test(phoneNumber)) {
+                updateStatus('❌ Please enter a valid phone number with country code (e.g., +91xxxxxxxxxx)', 'error');
+                return false;
+            }
+            
+            return true;
+        }
         
-        // Check status periodically
-        function checkStatus() {
-            fetch('/status')
+        function setupQR() {
+            updateStatus('Setting up WhatsApp login...', 'info');
+            fetch('/setup_qr', { method: 'POST' })
                 .then(response => response.json())
                 .then(data => {
-                    if (data.is_sending) {
-                        sendBtn.disabled = true;
-                        sendBtn.textContent = 'Sending...';
-                        loading.style.display = 'block';
-                        showStatus(data.status_message, 'info', data.progress || 0);
+                    if (data.status === 'success') {
+                        updateStatus('✅ ' + data.message, 'success');
                     } else {
-                        sendBtn.disabled = false;
-                        sendBtn.textContent = 'Send Message';
-                        loading.style.display = 'none';
-                        
-                        if (data.status_message.includes('successfully')) {
-                            showStatus(data.status_message, 'success', 100);
-                        } else if (data.status_message.includes('Error')) {
-                            showStatus(data.status_message, 'error', 0);
-                        } else if (data.status_message !== 'Ready to send message') {
-                            showStatus(data.status_message, 'info', data.progress || 0);
-                        }
+                        updateStatus('❌ ' + data.message, 'error');
                     }
                 })
                 .catch(error => {
-                    console.error('Error checking status:', error);
+                    updateStatus('❌ Error: ' + error.message, 'error');
                 });
         }
         
-        function showStatus(message, type, progress = 0) {
-            statusText.textContent = message;
-            statusDiv.className = `status ${type}`;
-            statusDiv.style.display = 'block';
-            progressFill.style.width = `${progress}%`;
-        }
-        
-        // Check status every 2 seconds
-        setInterval(checkStatus, 2000);
-        
-        // Handle form submission
-        form.addEventListener('submit', function(e) {
-            e.preventDefault();
+        function sendMessage() {
+            if (!validateInputs()) {
+                return;
+            }
             
-            const formData = new FormData(form);
+            const phoneNumber = document.getElementById('phoneNumber').value.trim();
+            const messageText = document.getElementById('messageText').value.trim();
             
-            fetch('/send', {
+            updateStatus('Sending message...', 'info');
+            
+            fetch('/send_message', { 
                 method: 'POST',
-                body: formData
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    phone_number: phoneNumber,
+                    message: messageText
+                })
             })
             .then(response => response.json())
             .then(data => {
-                if (data.success) {
-                    currentSessionId = data.session_id;
-                    showStatus(data.message, 'info', 0);
+                if (data.status === 'success') {
+                    updateStatus('✅ ' + data.message, 'success');
                 } else {
-                    showStatus(data.error, 'error', 0);
+                    updateStatus('❌ ' + data.message, 'error');
                 }
             })
             .catch(error => {
-                showStatus('Network error occurred', 'error', 0);
+                updateStatus('❌ Error: ' + error.message, 'error');
             });
-        });
+        }
         
-        // Initial status check
-        checkStatus();
+        function closeSession() {
+            updateStatus('Closing session...', 'info');
+            fetch('/close_session', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        updateStatus('✅ ' + data.message, 'success');
+                    } else {
+                        updateStatus('❌ ' + data.message, 'error');
+                    }
+                })
+                .catch(error => {
+                    updateStatus('❌ Error: ' + error.message, 'error');
+                });
+        }
+        
+        function clearAllData() {
+            if (confirm('This will clear all saved session data and you will need to login again. Are you sure?')) {
+                updateStatus('Clearing all session data...', 'info');
+                fetch('/clear_all_data', { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            updateStatus('✅ ' + data.message, 'success');
+                        } else {
+                            updateStatus('❌ ' + data.message, 'error');
+                        }
+                    })
+                    .catch(error => {
+                        updateStatus('❌ Error: ' + error.message, 'error');
+                    });
+            }
+        }
+        
+        // Auto-save inputs to localStorage
+        function saveInputs() {
+            const phoneNumber = document.getElementById('phoneNumber').value;
+            const messageText = document.getElementById('messageText').value;
+            
+            localStorage.setItem('whatsapp_phone', phoneNumber);
+            localStorage.setItem('whatsapp_message', messageText);
+        }
+        
+        // Load saved inputs
+        function loadInputs() {
+            const savedPhone = localStorage.getItem('whatsapp_phone');
+            const savedMessage = localStorage.getItem('whatsapp_message');
+            
+            if (savedPhone) {
+                document.getElementById('phoneNumber').value = savedPhone;
+            }
+            if (savedMessage) {
+                document.getElementById('messageText').value = savedMessage;
+            }
+        }
+        
+        // Add event listeners for auto-save
+        document.addEventListener('DOMContentLoaded', function() {
+            loadInputs();
+            
+            document.getElementById('phoneNumber').addEventListener('input', saveInputs);
+            document.getElementById('messageText').addEventListener('input', saveInputs);
+        });
     </script>
 </body>
 </html>
