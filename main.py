@@ -202,11 +202,22 @@ class WhatsAppBot:
     def ensure_logged_in(self):
         """Ensure we're logged in with better session handling"""
         try:
+            # Check if driver is alive, restart if needed
+            if not self.is_driver_alive():
+                logger.info("Driver not alive, restarting...")
+                if not self.restart_driver():
+                    return False, "Failed to restart browser driver"
+            
+            # If still no driver, try to setup
             if not self.driver:
                 if not self.setup_driver():
                     return False, "Failed to setup Chrome driver"
             
-            current_url = self.driver.current_url if self.driver else ""
+            try:
+                current_url = self.driver.current_url if self.driver else ""
+            except Exception as url_error:
+                logger.warning(f"Could not get current URL: {url_error}")
+                current_url = ""
             
             if "web.whatsapp.com" in current_url:
                 if self.quick_login_check():
@@ -215,8 +226,23 @@ class WhatsAppBot:
             
             if "web.whatsapp.com" not in current_url:
                 logger.info("Navigating to WhatsApp Web...")
-                self.driver.get("https://web.whatsapp.com")
-                time.sleep(2)
+                try:
+                    self.driver.get("https://web.whatsapp.com")
+                    time.sleep(2)
+                except Exception as nav_error:
+                    logger.error(f"Navigation error: {nav_error}")
+                    # Try restarting driver
+                    if "invalid session id" in str(nav_error).lower():
+                        if self.restart_driver():
+                            try:
+                                self.driver.get("https://web.whatsapp.com")
+                                time.sleep(2)
+                            except:
+                                return False, "Failed to navigate after driver restart"
+                        else:
+                            return False, "Failed to restart driver"
+                    else:
+                        return False, f"Navigation error: {str(nav_error)}"
             
             if self.quick_login_check():
                 self.is_logged_in = True
@@ -231,9 +257,13 @@ class WhatsAppBot:
             ]
             
             for selector in qr_selectors:
-                if self.driver.find_elements(By.CSS_SELECTOR, selector):
-                    qr_present = True
-                    break
+                try:
+                    if self.driver.find_elements(By.CSS_SELECTOR, selector):
+                        qr_present = True
+                        break
+                except Exception as selector_error:
+                    logger.warning(f"Error checking QR selector {selector}: {selector_error}")
+                    continue
             
             if qr_present:
                 return False, "Please scan QR code in browser to login"
@@ -248,6 +278,19 @@ class WhatsAppBot:
             
         except Exception as e:
             logger.error(f"Error in ensure_logged_in: {e}")
+            
+            # Handle invalid session error
+            if "invalid session id" in str(e).lower():
+                logger.info("Invalid session detected in ensure_logged_in")
+                if self.restart_driver():
+                    try:
+                        return self.ensure_logged_in()
+                    except Exception as retry_error:
+                        logger.error(f"Retry after restart failed: {retry_error}")
+                        return False, "Failed to login after driver restart"
+                else:
+                    return False, "Failed to restart driver"
+            
             return False, f"Login error: {str(e)}"
     
     def send_message(self, phone_number, message):
@@ -259,6 +302,12 @@ class WhatsAppBot:
                     return False, "Phone number is required"
                 
                 phone_number = phone_number.strip()
+                
+                # Check if driver is alive, restart if needed
+                if not self.is_driver_alive():
+                    logger.info("Driver not alive, restarting...")
+                    if not self.restart_driver():
+                        return False, "Failed to restart browser driver"
                 
                 # Ensure we have a driver and are logged in
                 login_success, login_msg = self.ensure_logged_in()
@@ -276,13 +325,38 @@ class WhatsAppBot:
                 print(f"Clean number: {clean_number}")
                 print(f"URL: {api_url}")
                 
-                # Navigate to the specific chat
-                self.driver.get(api_url)
-                time.sleep(2)  # Wait for page to load
+                # Navigate to the specific chat with error handling
+                try:
+                    self.driver.get(api_url)
+                    time.sleep(2)  # Wait for page to load
+                except Exception as nav_error:
+                    logger.error(f"Navigation error: {nav_error}")
+                    
+                    # Handle invalid session
+                    if "invalid session id" in str(nav_error).lower():
+                        if self.restart_driver():
+                            # Try again with new driver
+                            try:
+                                login_success, login_msg = self.ensure_logged_in()
+                                if not login_success:
+                                    return False, login_msg
+                                
+                                self.driver.get(api_url)
+                                time.sleep(2)
+                            except Exception as retry_error:
+                                return False, f"Failed to navigate after restart: {str(retry_error)}"
+                        else:
+                            return False, "Failed to restart driver"
+                    else:
+                        return False, f"Navigation error: {str(nav_error)}"
                 
                 # Check if we're still logged in
-                if not self.quick_login_check():
-                    return False, "Lost login session - please login again"
+                try:
+                    if not self.quick_login_check():
+                        return False, "Lost login session - please login again"
+                except Exception as login_check_error:
+                    logger.warning(f"Login check failed: {login_check_error}")
+                    # Continue anyway
                 
                 # Wait for the message to be populated in the input field
                 time.sleep(1)
@@ -303,28 +377,36 @@ class WhatsAppBot:
                 
                 while elapsed < max_wait and not send_button:
                     for selector in send_selectors:
-                        elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                        if elements and elements[0].is_enabled():
-                            send_button = elements[0]
-                            break
+                        try:
+                            elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                            if elements and elements[0].is_enabled():
+                                send_button = elements[0]
+                                break
+                        except Exception as selector_error:
+                            logger.warning(f"Error checking send button selector {selector}: {selector_error}")
+                            continue
                     
                     if not send_button:
                         time.sleep(wait_interval)
                         elapsed += wait_interval
                 
                 if send_button:
-                    # Use JavaScript click for reliability
-                    self.driver.execute_script("arguments[0].click();", send_button)
-                    time.sleep(0.5)
-                    
-                    # Update last used number
-                    self.last_phone_number = phone_number
-                    
-                    # Save cookies after successful message
-                    self.save_cookies()
-                    
-                    logger.info(f"Message sent successfully to {phone_number}")
-                    return True, f"Message sent successfully to {phone_number}"
+                    try:
+                        # Use JavaScript click for reliability
+                        self.driver.execute_script("arguments[0].click();", send_button)
+                        time.sleep(0.5)
+                        
+                        # Update last used number
+                        self.last_phone_number = phone_number
+                        
+                        # Save cookies after successful message
+                        self.save_cookies()
+                        
+                        logger.info(f"Message sent successfully to {phone_number}")
+                        return True, f"Message sent successfully to {phone_number}"
+                    except Exception as click_error:
+                        logger.error(f"Error clicking send button: {click_error}")
+                        # Continue to fallback method
                 
                 # Fallback: Try using Enter key
                 try:
@@ -349,7 +431,8 @@ class WhatsAppBot:
                                 
                                 logger.info(f"Message sent via Enter key to {phone_number}")
                                 return True, f"Message sent successfully to {phone_number}"
-                        except:
+                        except Exception as input_error:
+                            logger.warning(f"Error with input selector {selector}: {input_error}")
                             continue
                     
                     return False, "Could not send message - send button not found and Enter key failed"
@@ -360,24 +443,109 @@ class WhatsAppBot:
                 
             except Exception as e:
                 logger.error(f"Error in send_message: {e}")
+                
+                # Handle invalid session error
+                if "invalid session id" in str(e).lower():
+                    logger.info("Invalid session detected in send_message")
+                    if self.restart_driver():
+                        try:
+                            return self.send_message(phone_number, message)
+                        except Exception as retry_error:
+                            logger.error(f"Retry after restart failed: {retry_error}")
+                            return False, "Failed to send message after driver restart"
+                    else:
+                        return False, "Failed to restart driver"
+                
                 return False, f"Error: {str(e)}"
     
-    def get_qr_code(self):
-        """Get QR code for manual scanning with better detection"""
+    def is_driver_alive(self):
+        """Check if driver is still alive and responsive"""
         try:
+            if not self.driver:
+                return False
+            
+            # Try to get current URL - this will fail if session is invalid
+            self.driver.current_url
+            return True
+        except:
+            return False
+    
+    def restart_driver(self):
+        """Restart the driver after a crash"""
+        try:
+            logger.info("Restarting driver due to invalid session...")
+            
+            # Try to close existing driver
+            if self.driver:
+                try:
+                    self.driver.quit()
+                except:
+                    pass
+                
+            # Reset state
+            self.driver = None
+            self.wait = None
+            self.is_logged_in = False
+            
+            # Setup new driver
+            if self.setup_driver():
+                logger.info("Driver restarted successfully")
+                return True
+            else:
+                logger.error("Failed to restart driver")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error restarting driver: {e}")
+            return False
+    
+    def get_qr_code(self):
+        """Get QR code for manual scanning with better error handling"""
+        try:
+            # Check if driver is alive, restart if needed
+            if not self.is_driver_alive():
+                logger.info("Driver not alive, restarting...")
+                if not self.restart_driver():
+                    return False, "Failed to restart browser driver"
+            
+            # If still no driver, try to setup
             if not self.driver:
                 if not self.setup_driver():
                     return False, "Failed to setup driver"
             
             print("Loading WhatsApp Web...")
-            self.driver.get("https://web.whatsapp.com")
-            time.sleep(3)
             
+            # Navigate with retry logic
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    self.driver.get("https://web.whatsapp.com")
+                    time.sleep(3)
+                    break
+                except Exception as nav_error:
+                    logger.warning(f"Navigation attempt {attempt + 1} failed: {nav_error}")
+                    if attempt == max_retries - 1:
+                        # Try to restart driver on final attempt
+                        if not self.restart_driver():
+                            return False, "Failed to navigate to WhatsApp Web"
+                        else:
+                            # Try one more time with new driver
+                            try:
+                                self.driver.get("https://web.whatsapp.com")
+                                time.sleep(3)
+                                break
+                            except:
+                                return False, "Failed to navigate to WhatsApp Web after driver restart"
+                    else:
+                        time.sleep(2)
+            
+            # Check if already logged in
             if self.quick_login_check():
                 self.is_logged_in = True
                 self.save_cookies()
                 return True, "Already logged in - no QR code needed"
             
+            # Look for QR code
             qr_found = False
             qr_selectors = [
                 "[data-testid='qr-code']",
@@ -387,25 +555,36 @@ class WhatsAppBot:
                 ".qr-code"
             ]
             
+            # First quick check
             for selector in qr_selectors:
-                elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                if elements:
-                    print(f"QR code found with selector: {selector}")
-                    qr_found = True
-                    break
-            
-            if not qr_found:
-                time.sleep(2)
-                for selector in qr_selectors:
+                try:
                     elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
                     if elements:
                         print(f"QR code found with selector: {selector}")
                         qr_found = True
                         break
+                except Exception as selector_error:
+                    logger.warning(f"Error checking selector {selector}: {selector_error}")
+                    continue
+            
+            # If not found, wait and try again
+            if not qr_found:
+                time.sleep(2)
+                for selector in qr_selectors:
+                    try:
+                        elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                        if elements:
+                            print(f"QR code found with selector: {selector}")
+                            qr_found = True
+                            break
+                    except Exception as selector_error:
+                        logger.warning(f"Error checking selector {selector}: {selector_error}")
+                        continue
             
             if qr_found:
                 return True, "QR code is available for scanning in the browser window"
             
+            # Final check for login status
             if self.quick_login_check():
                 self.is_logged_in = True
                 self.save_cookies()
@@ -415,6 +594,20 @@ class WhatsAppBot:
                 
         except Exception as e:
             logger.error(f"Error in get_qr_code: {e}")
+            
+            # If we get an invalid session error, try to restart driver
+            if "invalid session id" in str(e).lower():
+                logger.info("Invalid session detected, attempting driver restart...")
+                if self.restart_driver():
+                    # Try one more time with new driver
+                    try:
+                        return self.get_qr_code()
+                    except Exception as retry_error:
+                        logger.error(f"Retry after restart failed: {retry_error}")
+                        return False, "Failed to get QR code after driver restart"
+                else:
+                    return False, "Failed to restart driver after invalid session"
+            
             return False, f"Error getting QR code: {str(e)}"
     
     def close_session(self):
@@ -486,6 +679,29 @@ def setup_qr():
             }), 400
             
     except Exception as e:
+        logger.error(f"Setup QR route error: {e}")
+        
+        # If it's an invalid session error, try to restart
+        if "invalid session id" in str(e).lower():
+            try:
+                bot.restart_driver()
+                success, message = bot.get_qr_code()
+                if success:
+                    return jsonify({
+                        'status': 'success',
+                        'message': message
+                    })
+                else:
+                    return jsonify({
+                        'status': 'error',
+                        'message': message
+                    }), 400
+            except Exception as retry_error:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Failed to restart after session error: {str(retry_error)}'
+                }), 500
+        
         return jsonify({
             'status': 'error',
             'message': f'Server error: {str(e)}'
@@ -570,7 +786,9 @@ def close_session():
             'status': 'error',
             'message': f'Server error: {str(e)}'
         }), 500
-        
+
+# REMOVED: send_custom_message route as it's duplicate of send_message
+
 # Clean up on exit
 def cleanup():
     bot.close_session()
